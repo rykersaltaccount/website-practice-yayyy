@@ -42,7 +42,7 @@ const LinearNavbar: React.FC<LinearNavbarProps> = ({ onOpenNewItem, onOpenSearch
           <div className="flex h-6 w-6 items-center justify-center rounded bg-white/[0.06] text-white">
             <LinearLogo className="w-3.5 h-3.5" />
           </div>
-          <span className="text-sm font-semibold tracking-tight text-white">Linear</span>
+          <span className="text-sm font-semibold tracking-tight text-white">Becoming Better</span>
         </NavLink>
       </div>
 
