@@ -11,21 +11,21 @@ const WeeklyActivity: React.FC = () => {
     date.setHours(0, 0, 0, 0);
     date.setDate(today.getDate() - (6 - index));
     const key = date.toLocaleDateString('en-CA');
-    const minutes = Math.round(codingSessions
+    const intervals = codingSessions
       .filter(session => new Date(session.endedAt).toLocaleDateString('en-CA') === key)
-      .reduce((total, session) => total + session.durationSeconds, 0) / 60);
-    return { label: dayNames[date.getDay()], minutes };
+      .reduce((total, session) => total + (session.deepWorkIntervals || 0), 0);
+    return { label: dayNames[date.getDay()], intervals };
   });
-  const maxMinutes = Math.max(60, ...days.map(day => day.minutes));
-  const points = days.map((day, index) => `${index * 16.66 + 2},${104 - (day.minutes / maxMinutes) * 84}`).join(' ');
-  const totalMinutes = days.reduce((total, day) => total + day.minutes, 0);
+  const maxIntervals = Math.max(4, ...days.map(day => day.intervals));
+  const points = days.map((day, index) => `${index * 16.66 + 2},${104 - (day.intervals / maxIntervals) * 84}`).join(' ');
+  const totalIntervals = days.reduce((total, day) => total + day.intervals, 0);
 
   return (
     <section className="linear-card p-5 space-y-4">
       <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
         <div>
           <h3 className="text-sm font-semibold text-white">Weekly Activity</h3>
-          <p className="mt-1 text-[11px] text-[#8a8f98]">Coding time · {totalMinutes >= 60 ? `${(totalMinutes / 60).toFixed(1)}h` : `${totalMinutes}m`} this week</p>
+          <p className="mt-1 text-[11px] text-[#8a8f98]">Deep Work Intervals · {totalIntervals} completed this week</p>
         </div>
         <span className="rounded border border-white/[0.08] px-2 py-1 text-[10px] text-[#8a8f98]">Last 7 days</span>
       </div>
@@ -37,7 +37,7 @@ const WeeklyActivity: React.FC = () => {
           <defs><linearGradient id="activity-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#5e6ad2" stopOpacity=".35" /><stop offset="1" stopColor="#5e6ad2" stopOpacity="0" /></linearGradient></defs>
           <polygon points={`2,104 ${points} 102,104`} fill="url(#activity-fill)" />
           <polyline points={points} fill="none" stroke="#6f80ed" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
-          {days.map((day, index) => <circle key={day.label} cx={index * 16.66 + 2} cy={104 - (day.minutes / maxMinutes) * 84} r="1.5" fill="#dce1ff" stroke="#5e6ad2" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
+          {days.map((day, index) => <circle key={day.label} cx={index * 16.66 + 2} cy={104 - (day.intervals / maxIntervals) * 84} r="1.5" fill="#dce1ff" stroke="#5e6ad2" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
         </svg>
         <div className="absolute inset-x-0 bottom-0 flex justify-between text-[10px] text-[#62666f]">
           {days.map(day => <span key={day.label}>{day.label}</span>)}

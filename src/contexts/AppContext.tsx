@@ -35,6 +35,7 @@ interface AppContextType {
   updateMistake: (id: string, mistake: Partial<Mistake>) => void;
   deleteMistake: (id: string) => void;
   toggleReviewed: (id: string) => void;
+  reviewConcept: (id: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -222,6 +223,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       startedAt: activeCodingStartedAt,
       endedAt: endedAt.toISOString(),
       durationSeconds,
+      deepWorkIntervals: Math.floor(durationSeconds / (25 * 60)),
     };
     setCodingSessions(prev => [...prev, session]);
     setActiveCodingStartedAt(null);
@@ -344,6 +346,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const newConcept: Concept = {
       ...concept,
       id: crypto.randomUUID(),
+      nextReviewDate: concept.nextReviewDate || new Date().toISOString(),
+      reviewIntervalIndex: concept.reviewIntervalIndex || 0,
     };
     setConcepts(prev => [newConcept, ...prev]);
     if (user) void saveToSupabase('concepts', user.id, newConcept);
@@ -369,6 +373,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       ...mistake,
       id: crypto.randomUUID(),
       reviewedRecently: false,
+      nextReviewDate: mistake.nextReviewDate || new Date().toISOString(),
+      reviewIntervalIndex: mistake.reviewIntervalIndex || 0,
     };
     setMistakes(prev => [newMistake, ...prev]);
     if (user) void saveToSupabase('mistakes', user.id, newMistake);
@@ -390,9 +396,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const toggleReviewed = (id: string) => {
     setMistakes(prev => {
-      const updated = prev.map(mistake => mistake.id === id ? { ...mistake, reviewedRecently: !mistake.reviewedRecently } : mistake);
+      const updated = prev.map(mistake => {
+        if (mistake.id !== id) return mistake;
+        const reviewed = !mistake.reviewedRecently;
+        if (!reviewed) return { ...mistake, reviewedRecently: false, nextReviewDate: new Date().toISOString() };
+        const intervalIndex = Math.min((mistake.reviewIntervalIndex || 0) + 1, 2);
+        const nextReviewDate = new Date();
+        nextReviewDate.setDate(nextReviewDate.getDate() + [1, 3, 7][intervalIndex]);
+        return { ...mistake, reviewedRecently: true, reviewIntervalIndex: intervalIndex, nextReviewDate: nextReviewDate.toISOString() };
+      });
       const item = updated.find(mistake => mistake.id === id);
       if (user && item) void saveToSupabase('mistakes', user.id, item);
+      return updated;
+    });
+  };
+
+  const reviewConcept = (id: string) => {
+    setConcepts(prev => {
+      const updated = prev.map(concept => {
+        if (concept.id !== id) return concept;
+        const intervalIndex = Math.min((concept.reviewIntervalIndex || 0) + 1, 2);
+        const nextReviewDate = new Date();
+        nextReviewDate.setDate(nextReviewDate.getDate() + [1, 3, 7][intervalIndex]);
+        return { ...concept, reviewIntervalIndex: intervalIndex, nextReviewDate: nextReviewDate.toISOString() };
+      });
+      const item = updated.find(concept => concept.id === id);
+      if (user && item) void saveToSupabase('concepts', user.id, item);
       return updated;
     });
   };
@@ -422,6 +451,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updateMistake,
       deleteMistake,
       toggleReviewed,
+      reviewConcept,
     }}>
       {children}
     </AppContext.Provider>

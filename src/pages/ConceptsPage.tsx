@@ -76,7 +76,7 @@ const buildExercises = (concept: Concept, difficulty?: PracticeDifficulty): Exer
 };
 
 const ConceptsPage: React.FC = () => {
-  const { concepts, addConcept, updateConcept, deleteConcept, problems, notes } = useContext(AppContext)!;
+  const { concepts, addConcept, updateConcept, deleteConcept, reviewConcept, problems, notes } = useContext(AppContext)!;
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -121,7 +121,7 @@ const ConceptsPage: React.FC = () => {
   const startConceptTest = async (concept: Concept) => {
     setIsGenerating(true);
     setAssessmentTask('test');
-    const generated = await generateExercises(concept, 'test');
+    const generated = await generateExercises(concept, 'test', undefined, 'isolated');
     setTestConcept(concept);
     setTestExercises(generated || buildExercises(concept));
     setTestIndex(0);
@@ -136,7 +136,7 @@ const ConceptsPage: React.FC = () => {
     setIsGenerating(true);
     setAssessmentTask('practice');
     const concept = practiceConcept;
-    const generated = await generateExercises(concept, 'practice', practiceDifficulty);
+    const generated = await generateExercises(concept, 'practice', practiceDifficulty, 'isolated');
     setTestConcept(concept);
     setTestExercises(generated || buildExercises(concept, practiceDifficulty));
     setTestIndex(0);
@@ -272,6 +272,10 @@ const ConceptsPage: React.FC = () => {
                     <span>{relProblems.length} problems</span>
                     <span>•</span>
                     <span>{relNotes.length} notes</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-[#62666f]">
+                    <span>Next review: {concept.nextReviewDate ? new Date(concept.nextReviewDate).toLocaleDateString() : 'Today'}</span>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); reviewConcept(concept.id); }} className="text-[#c084fc] hover:text-white">Review today</button>
                   </div>
 
                   <span className="text-[11px] text-[#c084fc] font-medium group-hover:underline">

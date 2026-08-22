@@ -76,12 +76,20 @@ const extractJson = (text: string): unknown => {
   return JSON.parse(cleaned);
 };
 
-export const generateExercises = async (concept: Concept, task: 'practice' | 'test', difficulty?: string): Promise<GeneratedExercise[] | null> => {
+export const generateExercises = async (
+  conceptsInput: Concept | Concept[],
+  task: 'practice' | 'test',
+  difficulty?: string,
+  mode: 'combined' | 'isolated' = 'combined',
+): Promise<GeneratedExercise[] | null> => {
+  const concepts = Array.isArray(conceptsInput) ? conceptsInput.slice(0, 3) : [conceptsInput];
+  const conceptSummary = concepts.map(concept => `- ${concept.name}: ${concept.description}. Time complexity: ${concept.timeComplexity || 'unknown'}`).join('\n');
+  const conceptNames = concepts.map(concept => concept.name).join(' + ');
   const config = getAiConfig(task);
   if (!config.apiKey.trim() && config.provider !== 'ollama') return null;
   if (!config.endpoint.trim() || !config.model.trim()) return null;
 
-  const instruction = `Generate exactly ${task === 'test' ? 5 : 3} ORIGINAL programming exercises for the concept "${concept.name}". ${difficulty ? `Difficulty: ${difficulty}.` : 'Progress from foundational to advanced.'} Use this concept context: ${concept.description}. Time complexity: ${concept.timeComplexity || 'unknown'}. Mix conceptual questions and C++ coding problems; at least one exercise must have type "coding". Every coding task must require a self-contained C++23 solution with a clear function or main-program requirement, starterCode, and validationTokens containing 2-5 distinctive implementation tokens. Do not reproduce, paraphrase, or reference any known LeetCode, HackerRank, Codewars, interview, textbook, or common online exercise. Invent a novel scenario specific to this concept. Return ONLY valid JSON: {"exercises":[{"type":"question|coding","level":"...","prompt":"...","hint":"...","acceptedAnswers":["keyword1"],"starterCode":"...","validationTokens":["functionName","distinctiveToken"]}]}. For coding items, acceptedAnswers may be empty.`;
+  const instruction = `Generate exactly ${task === 'test' ? 5 : 3} ORIGINAL programming exercises for ${conceptNames}. ${mode === 'combined' && concepts.length > 1 ? `Combine the concepts in every exercise where practical. Force the learner to recognize which concept applies first, how the concepts interact, and the trade-offs between them.` : 'Keep the exercises isolated to the individual concept and do not require knowledge of the other concepts.'} ${difficulty ? `Difficulty: ${difficulty}.` : 'Progress from foundational to advanced.'} Concept context:\n${conceptSummary}\nMix conceptual questions and C++ coding problems; at least one exercise must have type "coding". Every coding task must require a self-contained C++23 solution with a clear function or main-program requirement, starterCode, and validationTokens containing 2-5 distinctive implementation tokens. Do not reproduce, paraphrase, or reference any known LeetCode, HackerRank, Codewars, interview, textbook, or common online exercise. Invent a novel scenario specific to this concept combination. Return ONLY valid JSON: {"exercises":[{"type":"question|coding","level":"...","prompt":"...","hint":"...","acceptedAnswers":["keyword1"],"starterCode":"...","validationTokens":["functionName","distinctiveToken"]}]}. For coding items, acceptedAnswers may be empty.`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let url = config.endpoint;
   let body: string;

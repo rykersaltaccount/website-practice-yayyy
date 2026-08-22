@@ -253,6 +253,7 @@ const MistakesPage: React.FC = () => {
                         </span>
                       )}
                     </div>
+                    <span>Next review: {mistake.nextReviewDate ? new Date(mistake.nextReviewDate).toLocaleDateString() : 'Today'}</span>
 
                     {/* Action Button Hierarchy Improvement: Moved Delete to a more structured position */}
                     <div className="flex items-center gap-2">

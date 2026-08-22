@@ -60,6 +60,8 @@ export interface Concept {
   relatedProblems: string[]; // Problem IDs
   relatedNotes: string[]; // Note IDs
   mastery?: ConceptMastery;
+  nextReviewDate?: string;
+  reviewIntervalIndex?: number;
 }
 
 export interface ConceptMastery {
@@ -77,6 +79,8 @@ export interface Mistake {
   relatedProblems: string[]; // Problem IDs
   reviewedRecently: boolean;
   learningLog: string;
+  nextReviewDate?: string;
+  reviewIntervalIndex?: number;
 }
 
 export interface CodingSession {
@@ -84,6 +88,7 @@ export interface CodingSession {
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
+  deepWorkIntervals?: number;
 }
 
 // Auth types

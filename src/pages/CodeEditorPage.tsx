@@ -25,6 +25,39 @@ type DirectoryPickerWindow = Window & {
   showDirectoryPicker?: () => Promise<DirectoryHandle>;
 };
 
+const codeSnippets: Record<string, string> = {
+  '/includes': '#include <bits/stdc++.h>\nusing namespace std;\n',
+  '/fastio': 'ios::sync_with_stdio(false);\ncin.tie(nullptr);\n',
+  '/bfs': `queue<int> pending;
+vector<bool> visited(n, false);
+pending.push(start);
+visited[start] = true;
+while (!pending.empty()) {
+  int node = pending.front();
+  pending.pop();
+  for (int next : graph[node]) {
+    if (!visited[next]) {
+      visited[next] = true;
+      pending.push(next);
+    }
+  }
+}
+`,
+  '/tree': `struct TreeNode {
+  int value;
+  TreeNode* left;
+  TreeNode* right;
+  TreeNode(int value) : value(value), left(nullptr), right(nullptr) {}
+};
+`,
+  '/graph': `vector<vector<int>> graph(n);
+for (const auto& edge : edges) {
+  graph[edge[0]].push_back(edge[1]);
+  graph[edge[1]].push_back(edge[0]);
+}
+`,
+};
+
 const javascriptTokenPattern = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|`(?:\\.|[^`])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\b(?:const|let|var|function|return|if|else|for|while|class|new|throw|try|catch|typeof|import|from|export|default|async|await)\b|\b(?:true|false|null|undefined)\b|\b\d+(?:\.\d+)?\b|\b(?:console|Math|Array|Object|Map|Set|String|Number|JSON|Promise)\b|\b[a-zA-Z_$][\w$]*(?=\s*\()|===|!==|=>|==|!=|<=|>=|&&|\|\||[+*/%=<>!-])/g;
 
 const highlightJavaScript = (code: string) => {
@@ -128,10 +161,31 @@ const CodeEditorPage = () => {
     setFiles(current => current.map(file => file.name === activeFile ? { ...file, content } : file));
   };
 
+  const expandSnippet = (content: string, cursorPosition: number) => {
+    const commandMatch = content.slice(0, cursorPosition).match(/\/(?:[a-z]+)$/);
+    if (!commandMatch) return null;
+    const snippet = codeSnippets[commandMatch[0]];
+    if (!snippet) return null;
+    const commandStart = cursorPosition - commandMatch[0].length;
+    return {
+      content: `${content.slice(0, commandStart)}${snippet}${content.slice(cursorPosition)}`,
+      cursorPosition: commandStart + snippet.length,
+      command: commandMatch[0],
+    };
+  };
+
   const handleEditorChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const textarea = event.currentTarget;
     const cursorPosition = textarea.selectionStart;
     const previousContent = activeContent;
+
+    const expanded = expandSnippet(textarea.value, cursorPosition);
+    if (expanded) {
+      updateActiveContent(expanded.content);
+      setStatus(`${expanded.command} snippet inserted.`);
+      requestAnimationFrame(() => textarea.setSelectionRange(expanded.cursorPosition, expanded.cursorPosition));
+      return;
+    }
 
     if (previousContent.length === textarea.value.length + 1) {
       const deletedOpening = previousContent[cursorPosition - 1];
@@ -456,6 +510,24 @@ const CodeEditorPage = () => {
               }`}
             >
               {file.name}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] bg-[#0b0c10] px-3 py-1 text-[10px] text-[#62666f]">
+          <span className="mr-1 uppercase tracking-wider">Snippets</span>
+          {Object.keys(codeSnippets).map(command => (
+            <button
+              key={command}
+              type="button"
+              onClick={() => {
+                const snippet = codeSnippets[command];
+                updateActiveContent(`${activeContent}${snippet}`);
+                setStatus(`${command} snippet inserted.`);
+              }}
+              className="rounded border border-white/[0.08] px-1.5 py-0.5 font-mono text-[#8a8f98] hover:border-[#5e6ad2]/50 hover:text-white"
+              title={`Insert ${command} snippet`}
+            >
+              {command}
             </button>
           ))}
         </div>

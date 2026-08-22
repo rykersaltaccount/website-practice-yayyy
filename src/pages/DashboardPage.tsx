@@ -24,6 +24,9 @@ const DashboardPage: React.FC = () => {
   const unreviewedMistakes = mistakes.filter(m => !m.reviewedRecently);
   const inProgressProblems = problems.filter(p => p.status === 'In Progress');
   const doneProblems = problems.filter(p => p.status === 'Done');
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const dueConcepts = concepts.filter(concept => !concept.nextReviewDate || concept.nextReviewDate.slice(0, 10) <= todayKey);
+  const dueMistakes = mistakes.filter(mistake => !mistake.nextReviewDate || mistake.nextReviewDate.slice(0, 10) <= todayKey);
 
   const problemsByDifficulty = {
     Easy: problems.filter(p => p.difficulty === 'Easy').length,
@@ -299,6 +302,17 @@ const DashboardPage: React.FC = () => {
             )}
           </div>
         </div>
+      </section>
+
+      <section className="linear-card p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+          <div><h3 className="text-sm font-semibold text-white">Due Today</h3><p className="mt-1 text-[11px] text-[#8a8f98]">Reviews ready for your next study session</p></div>
+          <span className="rounded bg-[#f59e0b]/10 px-2 py-1 text-[10px] font-semibold text-[#f59e0b]">{dueConcepts.length + dueMistakes.length} due</span>
+        </div>
+        {dueConcepts.length + dueMistakes.length > 0 ? <div className="grid gap-2 sm:grid-cols-2">
+          {dueConcepts.slice(0, 4).map(concept => <NavLink key={concept.id} to="/concepts" className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3 hover:border-[#c084fc]/40"><span className="text-[10px] uppercase tracking-wider text-[#c084fc]">Concept</span><p className="mt-1 text-xs font-semibold text-white">{concept.name}</p></NavLink>)}
+          {dueMistakes.slice(0, 4).map(mistake => <NavLink key={mistake.id} to="/mistakes" className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3 hover:border-[#f43f5e]/40"><span className="text-[10px] uppercase tracking-wider text-[#f43f5e]">Mistake</span><p className="mt-1 line-clamp-2 text-xs font-semibold text-white">{mistake.description}</p></NavLink>)}
+        </div> : <p className="py-4 text-center text-xs text-[#10b981]">All reviews are scheduled for later.</p>}
       </section>
 
       {/* Linear Issue Detail Inspector Modal (Image 2) */}
