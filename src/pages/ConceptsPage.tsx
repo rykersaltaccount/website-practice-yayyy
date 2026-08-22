@@ -2,6 +2,7 @@ import React, { useState, useContext } from 'react';
 import AppContext from '../contexts/AppContext';
 import type { Concept } from '../types';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { generateExercises } from '../utils/aiProviders';
 
 const CONCEPT_NOTE_TEMPLATE = `What is it?
 
@@ -18,6 +19,57 @@ Space complexity:
 Key takeaways:
 `;
 
+interface Exercise {
+  level: string;
+  prompt: string;
+  hint: string;
+  acceptedAnswers: string[];
+}
+
+type PracticeDifficulty = 'Easy' | 'Medium' | 'Hard';
+
+const buildExercises = (concept: Concept, difficulty?: PracticeDifficulty): Exercise[] => {
+  const name = concept.name;
+  const description = concept.description || `the core idea behind ${name}`;
+  const complexity = concept.timeComplexity || 'the expected time complexity';
+  const exercises = [
+    {
+      level: 'Foundations',
+      prompt: `In one sentence, what problem does ${name} solve?`,
+      hint: 'Start with the purpose, not the implementation.',
+      acceptedAnswers: [name.toLowerCase(), ...description.toLowerCase().split(/\W+/).filter(word => word.length > 4).slice(0, 3)],
+    },
+    {
+      level: 'Core mechanics',
+      prompt: `Describe the core mechanism or invariant that makes ${name} work.`,
+      hint: 'Name the state, rule, or operation that must remain true.',
+      acceptedAnswers: [name.toLowerCase(), ...description.toLowerCase().split(/\W+/).filter(word => word.length > 5).slice(1, 4)],
+    },
+    {
+      level: 'Application',
+      prompt: `Give a practical situation where you would choose ${name} over a simpler approach.`,
+      hint: 'Mention the constraint or benefit that drives the choice.',
+      acceptedAnswers: [name.toLowerCase(), 'performance', 'efficient', 'constraint', 'scale'],
+    },
+    {
+      level: 'Complexity',
+      prompt: `What time or space complexity should you expect when using ${name}?`,
+      hint: 'Use Big-O notation when you can.',
+      acceptedAnswers: [complexity.toLowerCase(), 'o(', 'complexity', 'linear', 'constant', 'log'],
+    },
+    {
+      level: 'Advanced synthesis',
+      prompt: `Explain one trade-off, edge case, or failure mode an expert should consider with ${name}.`,
+      hint: 'A strong answer names both the risk and how you would handle it.',
+      acceptedAnswers: ['trade-off', 'tradeoff', 'edge', 'case', 'failure', 'risk', 'memory', 'performance', name.toLowerCase()],
+    },
+  ];
+  if (difficulty === 'Easy') return exercises.slice(0, 2);
+  if (difficulty === 'Medium') return exercises.slice(1, 4);
+  if (difficulty === 'Hard') return exercises.slice(2);
+  return exercises;
+};
+
 const ConceptsPage: React.FC = () => {
   const { concepts, addConcept, updateConcept, deleteConcept, problems, notes } = useContext(AppContext)!;
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
@@ -25,6 +77,14 @@ const ConceptsPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [conceptToDelete, setConceptToDelete] = useState<Concept | null>(null);
+  const [testConcept, setTestConcept] = useState<Concept | null>(null);
+  const [testExercises, setTestExercises] = useState<Exercise[]>([]);
+  const [testIndex, setTestIndex] = useState(0);
+  const [testAnswer, setTestAnswer] = useState('');
+  const [testResult, setTestResult] = useState<'idle' | 'passed' | 'failed'>('idle');
+  const [practiceConcept, setPracticeConcept] = useState<Concept | null>(null);
+  const [practiceDifficulty, setPracticeDifficulty] = useState<PracticeDifficulty>('Medium');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const getRelatedProblems = (conceptId: string) => {
     const concept = concepts.find(c => c.id === conceptId);
@@ -49,6 +109,65 @@ const ConceptsPage: React.FC = () => {
   };
 
   const selectedConcept = concepts.find(concept => concept.id === selectedConceptId);
+
+  const startConceptTest = async (concept: Concept) => {
+    setIsGenerating(true);
+    const generated = await generateExercises(concept, 'test');
+    setTestConcept(concept);
+    setTestExercises(generated || buildExercises(concept));
+    setTestIndex(0);
+    setTestAnswer('');
+    setTestResult('idle');
+    setIsGenerating(false);
+  };
+
+  const startPractice = async () => {
+    if (!practiceConcept) return;
+    setIsGenerating(true);
+    const concept = practiceConcept;
+    const generated = await generateExercises(concept, 'practice', practiceDifficulty);
+    setTestConcept(concept);
+    setTestExercises(generated || buildExercises(concept, practiceDifficulty));
+    setTestIndex(0);
+    setTestAnswer('');
+    setTestResult('idle');
+    setPracticeConcept(null);
+    setIsGenerating(false);
+  };
+
+  const closeConceptTest = () => {
+    setTestConcept(null);
+    setTestAnswer('');
+    setTestResult('idle');
+  };
+
+  const submitExercise = () => {
+    const answer = testAnswer.trim().toLowerCase();
+    const exercise = testExercises[testIndex];
+    const passed = answer.length >= 12 && exercise.acceptedAnswers.some(keyword => answer.includes(keyword));
+    if (!passed || !testConcept) {
+      if (testConcept) {
+        updateConcept(testConcept.id, {
+          mastery: {
+            mastered: false,
+            bestScore: Math.max(testConcept.mastery?.bestScore || 0, testIndex),
+            attempts: (testConcept.mastery?.attempts || 0) + 1,
+          },
+        });
+      }
+      setTestResult('failed');
+      return;
+    }
+    if (testIndex === testExercises.length - 1) {
+      updateConcept(testConcept.id, {
+        mastery: { mastered: true, masteredAt: new Date().toISOString(), bestScore: testExercises.length, attempts: (testConcept.mastery?.attempts || 0) + 1 },
+      });
+      setTestResult('passed');
+      return;
+    }
+    setTestIndex(index => index + 1);
+    setTestAnswer('');
+  };
 
   const handleSaveConceptDetails = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -118,6 +237,7 @@ const ConceptsPage: React.FC = () => {
                         {concept.timeComplexity}
                       </span>
                     )}
+                    {concept.mastery?.mastered && <span className="rounded bg-[#10b981]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#10b981]">MASTERED</span>}
                   </div>
 
                   <h3 className="text-sm font-semibold text-white group-hover:text-[#c084fc] transition-colors leading-snug">
@@ -140,6 +260,20 @@ const ConceptsPage: React.FC = () => {
                     View Notes →
                   </span>
                 </div>
+                <button
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); startConceptTest(concept); }}
+                  className="mt-3 w-full rounded-md border border-[#c084fc]/30 bg-[#c084fc]/10 px-3 py-2 text-[11px] font-semibold text-[#d8b4fe] hover:bg-[#c084fc]/20"
+                >
+                  {concept.mastery?.mastered ? 'Retake mastery test' : 'Start progressive test'}
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); setPracticeConcept(concept); }}
+                  className="mt-2 w-full rounded-md border border-[#06b6d4]/30 px-3 py-2 text-[11px] font-semibold text-[#67e8f9] hover:bg-[#06b6d4]/10"
+                >
+                  Practice this concept
+                </button>
               </div>
             );
           })}
@@ -228,6 +362,81 @@ const ConceptsPage: React.FC = () => {
             setSelectedConceptId(null);
           }}
         />
+      )}
+
+      {testConcept && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+          <div className="w-full max-w-2xl rounded-xl border border-white/[0.12] bg-[#0c0d12] p-6 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-white/[0.08] pb-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#c084fc]">Progressive assessment</p>
+                <h2 className="mt-1 text-lg font-bold text-white">{testConcept.name} mastery test</h2>
+                <p className="mt-1 text-xs text-[#8a8f98]">Basics to advanced synthesis · pass every exercise to master it</p>
+              </div>
+              <button type="button" onClick={closeConceptTest} className="text-[#8a8f98] hover:text-white" aria-label="Close test">✕</button>
+            </div>
+
+            {testResult === 'passed' ? (
+              <div className="py-12 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#10b981]/15 text-2xl text-[#10b981]">✓</div>
+                <h3 className="mt-4 text-xl font-bold text-white">Concept mastered</h3>
+                <p className="mt-2 text-sm text-[#8a8f98]">You completed all {testExercises.length} exercises without failing.</p>
+                <button type="button" onClick={closeConceptTest} className="linear-btn-primary mt-6 px-4 py-2 text-xs font-semibold">Done</button>
+              </div>
+            ) : testResult === 'failed' ? (
+              <div className="py-10 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#f43f5e]/15 text-2xl text-[#f43f5e]">!</div>
+                <h3 className="mt-4 text-xl font-bold text-white">Test not passed</h3>
+                <p className="mt-2 text-sm text-[#8a8f98]">A mastery test requires every answer to pass. Review the concept and try again.</p>
+                <div className="mt-6 flex justify-center gap-2">
+                  <button type="button" onClick={closeConceptTest} className="rounded-md border border-white/[0.1] px-4 py-2 text-xs text-[#8a8f98] hover:text-white">Close</button>
+                  <button type="button" onClick={() => startConceptTest(testConcept)} className="linear-btn-primary px-4 py-2 text-xs font-semibold">Try again</button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={(event) => { event.preventDefault(); submitExercise(); }} className="space-y-5 pt-5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-white">Exercise {testIndex + 1} of {testExercises.length}</span>
+                  <span className="text-[#c084fc]">{testExercises[testIndex].level}</span>
+                </div>
+                <div className="h-1 rounded-full bg-white/[0.08]"><div className="h-full rounded-full bg-[#c084fc] transition-all" style={{ width: `${((testIndex + 1) / testExercises.length) * 100}%` }} /></div>
+                <div>
+                  <h3 className="text-base font-semibold leading-relaxed text-white">{testExercises[testIndex].prompt}</h3>
+                  <p className="mt-2 text-xs text-[#8a8f98]">Hint: {testExercises[testIndex].hint}</p>
+                </div>
+                <textarea value={testAnswer} onChange={event => setTestAnswer(event.target.value)} rows={5} autoFocus className="linear-input w-full resize-none p-3 text-sm leading-relaxed" placeholder="Write your answer..." required />
+                <div className="flex justify-end"><button type="submit" disabled={isGenerating} className="linear-btn-primary px-4 py-2 text-xs font-semibold">{isGenerating ? 'Generating...' : testIndex === testExercises.length - 1 ? 'Finish test' : 'Check answer'}</button></div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {practiceConcept && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-xl border border-white/[0.12] bg-[#0c0d12] p-6 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-white/[0.08] pb-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#06b6d4]">Practice mode</p>
+                <h2 className="mt-1 text-lg font-bold text-white">{practiceConcept.name}</h2>
+                <p className="mt-1 text-xs text-[#8a8f98]">Choose a difficulty and work through targeted exercises.</p>
+              </div>
+              <button type="button" onClick={() => setPracticeConcept(null)} className="text-[#8a8f98] hover:text-white" aria-label="Close practice setup">✕</button>
+            </div>
+            <div className="space-y-2 pt-5">
+              {(['Easy', 'Medium', 'Hard'] as PracticeDifficulty[]).map(difficulty => (
+                <label key={difficulty} className={`flex cursor-pointer items-center justify-between rounded-lg border p-3 transition-colors ${practiceDifficulty === difficulty ? 'border-[#06b6d4] bg-[#06b6d4]/10' : 'border-white/[0.08] hover:border-white/[0.18]'}`}>
+                  <span><span className="block text-xs font-semibold text-white">{difficulty}</span><span className="mt-1 block text-[11px] text-[#8a8f98]">{difficulty === 'Easy' ? 'Definitions and core purpose' : difficulty === 'Medium' ? 'Mechanics and complexity' : 'Applications and trade-offs'}</span></span>
+                  <input type="radio" name="practiceDifficulty" value={difficulty} checked={practiceDifficulty === difficulty} onChange={() => setPracticeDifficulty(difficulty)} className="accent-[#06b6d4]" />
+                </label>
+              ))}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setPracticeConcept(null)} className="rounded-md border border-white/[0.1] px-4 py-2 text-xs text-[#8a8f98] hover:text-white">Cancel</button>
+              <button type="button" onClick={startPractice} className="linear-btn-primary px-4 py-2 text-xs font-semibold">Start practice</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add / Edit Concept Info Modal */}

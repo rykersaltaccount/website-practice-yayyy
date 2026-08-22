@@ -19,6 +19,7 @@ import NotesPage from './pages/NotesPage';
 import ConceptsPage from './pages/ConceptsPage';
 import MistakesPage from './pages/MistakesPage';
 import CodeEditorPage from './pages/CodeEditorPage';
+import AiSettingsModal from './components/AiSettingsModal';
 
 function App() {
   const { addProblem } = useContext(AppContext)!;
@@ -27,6 +28,7 @@ function App() {
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
   const [showSignup, setShowSignup] = useState(false);
   const [isRecoveryMode, setIsRecoveryMode] = useState(() => window.location.hash.includes('type=recovery'));
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -105,6 +107,7 @@ function App() {
       <LinearNavbar
         onOpenNewItem={() => setIsNewIssueOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
+        onOpenSettings={() => setIsAiSettingsOpen(true)}
       />
 
       {/* Main Workspace Split Layout */}
@@ -180,6 +183,8 @@ function App() {
           </div>
         </div>
       )}
+
+      {isAiSettingsOpen && <AiSettingsModal onClose={() => setIsAiSettingsOpen(false)} />}
     </div>
   );
 }

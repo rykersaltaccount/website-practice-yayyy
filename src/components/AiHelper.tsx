@@ -1,5 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import AppContext from '../contexts/AppContext';
+import { getAiConfig, saveAiConfig, type AiProvider } from '../utils/aiProviders';
 
 interface Message {
   role: 'assistant' | 'user';
@@ -26,10 +27,11 @@ const formatMessage = (text: string) => text.split('\n').map((line, lineIndex) =
 });
 
 const API_PRESETS = {
-  openai: { label: 'ChatGPT / OpenAI', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
-  xai: { label: 'Grok / xAI', endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.5' },
-  nim: { label: 'NVIDIA NIM', endpoint: '/api/nvidia/v1/chat/completions', model: 'meta/llama-3.1-8b-instruct' },
+  chatgpt: { label: 'ChatGPT / OpenAI', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
+  grok: { label: 'Grok / xAI', endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.1-mini' },
+  nim: { label: 'NVIDIA NIM', endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions', model: 'meta/llama-3.1-8b-instruct' },
   ollama: { label: 'Ollama (local)', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.2' },
+  gemini: { label: 'Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/models', model: 'gemini-2.0-flash' },
   custom: { label: 'Custom OpenAI-compatible', endpoint: '', model: '' },
 } as const;
 type ApiProvider = keyof typeof API_PRESETS;
@@ -40,13 +42,25 @@ const AiHelper = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiProvider, setApiProvider] = useState<ApiProvider>(() => (localStorage.getItem('codevault-ai-provider') as ApiProvider) || 'openai');
-  const [apiEndpoint, setApiEndpoint] = useState(() => localStorage.getItem('codevault-ai-endpoint') || API_PRESETS.openai.endpoint);
-  const [apiModel, setApiModel] = useState(() => localStorage.getItem('codevault-ai-model') || API_PRESETS.openai.model);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('codevault-ai-key') || '');
+  const [apiProvider, setApiProvider] = useState<ApiProvider>(() => getAiConfig('helper').provider as ApiProvider);
+  const [apiEndpoint, setApiEndpoint] = useState(() => getAiConfig('helper').endpoint);
+  const [apiModel, setApiModel] = useState(() => getAiConfig('helper').model);
+  const [apiKey, setApiKey] = useState(() => getAiConfig('helper').apiKey);
   const [messages, setMessages] = useState<Message[]>([]);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const isOllama = apiProvider === 'ollama';
+
+  useEffect(() => {
+    const reload = () => {
+      const config = getAiConfig('helper');
+      setApiProvider(config.provider as ApiProvider);
+      setApiEndpoint(config.endpoint);
+      setApiModel(config.model);
+      setApiKey(config.apiKey);
+    };
+    window.addEventListener('ai-settings-updated', reload);
+    return () => window.removeEventListener('ai-settings-updated', reload);
+  }, []);
 
   useEffect(() => {
     const textarea = promptRef.current;
@@ -65,10 +79,7 @@ const AiHelper = () => {
   };
 
   const saveApiSettings = () => {
-    localStorage.setItem('codevault-ai-provider', apiProvider);
-    localStorage.setItem('codevault-ai-endpoint', apiEndpoint.trim());
-    localStorage.setItem('codevault-ai-model', apiModel.trim());
-    localStorage.setItem('codevault-ai-key', apiKey.trim());
+    saveAiConfig('helper', { provider: apiProvider as AiProvider, endpoint: apiEndpoint.trim(), model: apiModel.trim(), apiKey: apiKey.trim() });
     setShowSettings(false);
     addMessage({
       role: 'assistant',
@@ -80,7 +91,7 @@ const AiHelper = () => {
   };
 
   const askConfiguredApi = async (request: string) => {
-    const requestEndpoint = apiProvider === 'nim' ? API_PRESETS.nim.endpoint : apiEndpoint.trim();
+    const requestEndpoint = apiEndpoint.trim();
     const workspace = {
       problems: context.problems.slice(-40).map(p => ({ title: p.title, status: p.status, difficulty: p.difficulty, topics: p.topics })),
       notes: context.notes.slice(-20).map(n => ({ title: n.title, tags: n.tags })),
@@ -89,14 +100,16 @@ const AiHelper = () => {
     };
 
     let response: Response;
+    const isGemini = apiProvider === 'gemini';
+    const requestUrl = isGemini ? `${requestEndpoint}/${apiModel.trim()}:generateContent?key=${encodeURIComponent(apiKey.trim())}` : requestEndpoint;
     try {
-      response = await fetch(requestEndpoint, {
+      response = await fetch(requestUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
+          ...(!isGemini && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
         },
-        body: JSON.stringify({
+        body: isGemini ? JSON.stringify({ contents: [{ parts: [{ text: request }] }] }) : JSON.stringify({
           model: apiModel.trim(),
           temperature: 0.3,
           messages: [
@@ -115,8 +128,8 @@ const AiHelper = () => {
       throw new Error(`${API_PRESETS[apiProvider].label} returned HTTP ${response.status}: ${responseBody.slice(0, 300)}`);
     }
 
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return data.choices?.[0]?.message?.content || 'Completed request.';
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    return isGemini ? data.candidates?.[0]?.content?.parts?.[0]?.text || 'Completed request.' : data.choices?.[0]?.message?.content || 'Completed request.';
   };
 
   const handlePrompt = async (event: React.FormEvent) => {

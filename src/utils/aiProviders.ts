@@ -1,0 +1,87 @@
+import type { Concept } from '../types';
+
+export type AiTask = 'practice' | 'test' | 'helper';
+export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
+
+export interface AiConfig {
+  provider: AiProvider;
+  apiKey: string;
+  endpoint: string;
+  model: string;
+}
+
+export interface GeneratedExercise {
+  level: string;
+  prompt: string;
+  hint: string;
+  acceptedAnswers: string[];
+}
+
+const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
+  nim: { provider: 'nim', endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions', model: 'meta/llama-3.1-8b-instruct' },
+  ollama: { provider: 'ollama', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.2' },
+  chatgpt: { provider: 'chatgpt', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
+  gemini: { provider: 'gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/models', model: 'gemini-2.0-flash' },
+  grok: { provider: 'grok', endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.1-mini' },
+  custom: { provider: 'custom', endpoint: '', model: '' },
+};
+
+const storageKey = 'codevault-ai-configs';
+
+export const getAiConfig = (task: AiTask): AiConfig => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}') as Partial<Record<AiTask, AiConfig>>;
+    const config = saved[task];
+    if (config) return { ...config, apiKey: config.apiKey || '' };
+  } catch {
+    // Use defaults when saved settings are unreadable.
+  }
+  return { ...defaults.chatgpt, apiKey: '' };
+};
+
+export const saveAiConfig = (task: AiTask, config: AiConfig) => {
+  const saved = JSON.parse(localStorage.getItem(storageKey) || '{}') as Partial<Record<AiTask, AiConfig>>;
+  localStorage.setItem(storageKey, JSON.stringify({ ...saved, [task]: config }));
+  window.dispatchEvent(new CustomEvent('ai-settings-updated'));
+};
+
+export const providerDefaults = defaults;
+
+const extractJson = (text: string): unknown => {
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  return JSON.parse(cleaned);
+};
+
+export const generateExercises = async (concept: Concept, task: 'practice' | 'test', difficulty?: string): Promise<GeneratedExercise[] | null> => {
+  const config = getAiConfig(task);
+  if (!config.apiKey.trim() && config.provider !== 'ollama') return null;
+  if (!config.endpoint.trim() || !config.model.trim()) return null;
+
+  const instruction = `Generate exactly ${task === 'test' ? 5 : 3} programming exercises for the concept "${concept.name}". ${difficulty ? `Difficulty: ${difficulty}.` : 'Progress from foundational to advanced.'} Use this concept context: ${concept.description}. Time complexity: ${concept.timeComplexity || 'unknown'}. Return ONLY valid JSON: {"exercises":[{"level":"...","prompt":"...","hint":"...","acceptedAnswers":["keyword1","keyword2"]}]}. acceptedAnswers must contain concepts a correct free-text answer should mention.`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let url = config.endpoint;
+  let body: string;
+
+  if (config.provider === 'gemini') {
+    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+    body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature: 0.3, responseMimeType: 'application/json' } });
+  } else {
+    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
+    body = JSON.stringify({ model: config.model, temperature: 0.3, messages: [{ role: 'system', content: 'You generate rigorous programming assessments.' }, { role: 'user', content: instruction }] });
+  }
+
+  try {
+    const response = await fetch(url, { method: 'POST', headers, body });
+    if (!response.ok) throw new Error(`AI provider returned HTTP ${response.status}`);
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const text = config.provider === 'gemini'
+      ? data.candidates?.[0]?.content?.parts?.[0]?.text
+      : data.choices?.[0]?.message?.content;
+    if (!text) throw new Error('AI provider returned no exercise content');
+    const parsed = extractJson(text) as { exercises?: GeneratedExercise[] };
+    return parsed.exercises?.filter(exercise => exercise.prompt && exercise.acceptedAnswers?.length) || null;
+  } catch (error) {
+    console.warn('AI exercise generation failed; using local exercises.', error);
+    return null;
+  }
+};

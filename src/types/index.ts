@@ -59,6 +59,14 @@ export interface Concept {
   tags?: string[];
   relatedProblems: string[]; // Problem IDs
   relatedNotes: string[]; // Note IDs
+  mastery?: ConceptMastery;
+}
+
+export interface ConceptMastery {
+  mastered: boolean;
+  masteredAt?: string;
+  bestScore: number;
+  attempts: number;
 }
 
 export interface Mistake {

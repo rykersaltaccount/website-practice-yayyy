@@ -7,6 +7,7 @@ import CodingTimer from './CodingTimer';
 interface LinearNavbarProps {
   onOpenNewItem?: () => void;
   onOpenSearch?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export const LinearLogo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -16,7 +17,7 @@ export const LinearLogo: React.FC<{ className?: string }> = ({ className = 'w-4 
   </svg>
 );
 
-const LinearNavbar: React.FC<LinearNavbarProps> = ({ onOpenNewItem, onOpenSearch }) => {
+const LinearNavbar: React.FC<LinearNavbarProps> = ({ onOpenNewItem, onOpenSearch, onOpenSettings }) => {
   const { user, logout } = useContext(AuthContext)!;
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
@@ -67,6 +68,10 @@ const LinearNavbar: React.FC<LinearNavbarProps> = ({ onOpenNewItem, onOpenSearch
         </button>
 
         <div className="hidden h-4 w-[1px] bg-white/[0.1] sm:block" />
+
+        <button type="button" onClick={onOpenSettings} className="rounded-md p-1.5 text-[#8a8f98] hover:bg-white/[0.06] hover:text-white" title="AI settings" aria-label="Open AI settings">
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4V19a2 2 0 1 1-4 0v-.2a2 2 0 0 0-3.4-1.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A2 2 0 0 0 3.6 11H3a2 2 0 1 1 0-4h.2a2 2 0 0 0 1.4-3.4l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A2 2 0 0 0 11 2.4V2a2 2 0 1 1 4 0v.2a2 2 0 0 0 3.4 1.4l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A2 2 0 0 0 20.6 7h.2a2 2 0 1 1 0 4h-.2a2 2 0 0 0-1.2 4Z" /></svg>
+        </button>
 
         {/* Action Button: Pill Button matching Image 1 / Image 2 */}
         {onOpenNewItem && (
