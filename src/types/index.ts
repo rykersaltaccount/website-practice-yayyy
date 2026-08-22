@@ -71,6 +71,13 @@ export interface Mistake {
   learningLog: string;
 }
 
+export interface CodingSession {
+  id: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+}
+
 // Auth types
 export interface User {
   id: string;

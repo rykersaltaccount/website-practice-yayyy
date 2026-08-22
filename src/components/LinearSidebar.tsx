@@ -21,9 +21,6 @@ const LinearSidebar: React.FC<LinearSidebarProps> = ({ onOpenNewItem, onOpenSear
             <LinearLogo className="w-3 h-3" />
           </div>
           <span className="font-semibold text-white tracking-tight text-sm">Becoming Better</span>
-          <svg className="w-3 h-3 text-[#8a8f98]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="m6 9 6 6 6-6" />
-          </svg>
         </div>
 
         <div className="flex items-center gap-1">

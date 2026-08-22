@@ -1,5 +1,5 @@
 ﻿import { createContext, useState, useEffect, useContext } from 'react';
-import type { Problem, Note, Concept, Mistake } from '../types';
+import type { Problem, Note, Concept, Mistake, CodingSession } from '../types';
 import type { ReactNode } from 'react';
 import AuthContext, { supabase } from './AuthContext';
 
@@ -8,6 +8,10 @@ interface AppContextType {
   notes: Note[];
   concepts: Concept[];
   mistakes: Mistake[];
+  codingSessions: CodingSession[];
+  activeCodingStartedAt: string | null;
+  startCoding: () => void;
+  stopCoding: () => void;
 
   // Problems
   addProblem: (problem: Omit<Problem, 'id'>) => void;
@@ -111,6 +115,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return [];
   });
 
+  const [codingSessions, setCodingSessions] = useState<CodingSession[]>(() => {
+    try {
+      const saved = localStorage.getItem('codevault-coding-sessions');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeCodingStartedAt, setActiveCodingStartedAt] = useState<string | null>(() =>
+    localStorage.getItem('codevault-active-coding-start')
+  );
+
   useEffect(() => {
     if (!user || !supabase) return;
 
@@ -182,6 +199,33 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       console.error('Unable to save mistakes to localStorage:', error);
     }
   }, [mistakes]);
+
+  useEffect(() => {
+    localStorage.setItem('codevault-coding-sessions', JSON.stringify(codingSessions));
+  }, [codingSessions]);
+
+  useEffect(() => {
+    if (activeCodingStartedAt) localStorage.setItem('codevault-active-coding-start', activeCodingStartedAt);
+    else localStorage.removeItem('codevault-active-coding-start');
+  }, [activeCodingStartedAt]);
+
+  const startCoding = () => {
+    if (!activeCodingStartedAt) setActiveCodingStartedAt(new Date().toISOString());
+  };
+
+  const stopCoding = () => {
+    if (!activeCodingStartedAt) return;
+    const endedAt = new Date();
+    const durationSeconds = Math.max(1, Math.floor((endedAt.getTime() - new Date(activeCodingStartedAt).getTime()) / 1000));
+    const session: CodingSession = {
+      id: crypto.randomUUID(),
+      startedAt: activeCodingStartedAt,
+      endedAt: endedAt.toISOString(),
+      durationSeconds,
+    };
+    setCodingSessions(prev => [...prev, session]);
+    setActiveCodingStartedAt(null);
+  };
 
   // Problem functions
   const addProblem = (problem: Omit<Problem, 'id'>) => {
@@ -359,6 +403,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       notes,
       concepts,
       mistakes,
+      codingSessions,
+      activeCodingStartedAt,
+      startCoding,
+      stopCoding,
       addProblem,
       loadDemoProblems,
       clearDemoProblems,

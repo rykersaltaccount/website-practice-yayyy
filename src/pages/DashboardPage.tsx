@@ -4,6 +4,7 @@ import AppContext from '../contexts/AppContext';
 import type { Problem } from '../types';
 import LinearIssueDetail from '../components/LinearIssueDetail';
 import ConfirmDialog from '../components/ConfirmDialog';
+import WeeklyActivity from '../components/WeeklyActivity';
 
 const DashboardPage: React.FC = () => {
   const { problems, notes, concepts, mistakes, loadDemoProblems, clearDemoProblems, updateProblem, deleteProblem } = useContext(AppContext)!;
@@ -215,8 +216,9 @@ const DashboardPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Bottom Insights Grid */}
+      {/* Activity and insights */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <WeeklyActivity />
         {/* Difficulty Breakdown */}
         <div className="linear-card p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">

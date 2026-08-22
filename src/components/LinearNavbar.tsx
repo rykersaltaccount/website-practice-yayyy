@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useContext } from 'react';
 import AuthContext from '../contexts/AuthContext';
+import CodingTimer from './CodingTimer';
 
 interface LinearNavbarProps {
   onOpenNewItem?: () => void;
@@ -48,6 +49,7 @@ const LinearNavbar: React.FC<LinearNavbarProps> = ({ onOpenNewItem, onOpenSearch
 
       {/* Right Actions */}
       <div className="flex items-center gap-3">
+        <CodingTimer />
         {/* Search Trigger */}
         <button
           type="button"
