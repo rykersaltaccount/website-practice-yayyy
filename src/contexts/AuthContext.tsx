@@ -14,11 +14,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Get Supabase credentials from environment variables
 const getSupabaseUrl = (): string => {
-  return import.meta.env.VITE_SUPABASE_URL || '';
+  return import.meta.env.VITE_SUPABASE_URL?.trim() || '';
 };
 
 const getSupabaseAnonKey = (): string => {
-  return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  return import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '';
 };
 
 // Initialize Supabase client
@@ -210,7 +210,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setAuthState({ user: null, isLoading: true, error: null });
     
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data: signupData, error } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
         options: {
@@ -224,6 +224,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       
       // Note: With email confirmations, the user might not be created yet
       // The onAuthStateChange listener will handle it when they confirm and sign in
+      if (!signupData.session) {
+        setAuthState(prev => ({ ...prev, isLoading: false }));
+      }
     } catch (error: any) {
       setAuthState({
         user: null,
