@@ -159,13 +159,17 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
     onProgress?.(`Sending request to ${config.model}...`);
     let response: Response;
     try {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 120000);
       response = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+        signal: controller.signal,
       });
+      window.clearTimeout(timeout);
     } catch {
-      throw new Error('Could not reach the CodeVault AI proxy. Start npm run dev:compiler locally or redeploy Vercel so /api/ai is available.');
+      throw new Error('The AI request timed out or the CodeVault AI proxy is unavailable. Check NIM status, then start npm run dev:compiler locally or redeploy Vercel.');
     }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 240);
