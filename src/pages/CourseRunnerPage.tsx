@@ -5,7 +5,7 @@ import type { Lesson, Drill } from '../types/course';
 import { generateCourseLesson, gradeCodingExercise } from '../utils/aiProviders';
 
 const CourseRunnerPage: React.FC = () => {
-  const { courseId, lessonId } = useParams();
+const { courseId, lessonId } = useParams();
   const { courses, updateCourse, addMistake, addConcept, startCoding, stopCoding } = useContext(AppContext)!;
   const course = courses.find(item => item.id === courseId);
   const sourceLesson = course?.modules.flatMap(module => module.lessons).find(lesson => lesson.id === lessonId);
