@@ -320,8 +320,8 @@ const CodeEditorPage = () => {
       ? `Recorded mistake: ${selectedMistake.description}\nExample: ${selectedMistake.example}\nLearning log: ${selectedMistake.learningLog}`
       : 'No recorded mistake exists yet; focus on the user\'s stated difficulty.';
     const prompt = task === 'exercise'
-      ? `Create one focused C++ coding exercise. Focus on exactly one mistake or difficulty, not a broad curriculum.\n${mistakeContext}\nUser specifics: ${specifics || 'Choose the most relevant unreviewed mistake.'}\nReturn only a complete main.cpp file. Use standard C++17, include required headers, provide a clear problem comment and function signature, and leave TODO guidance without including the solution.`
-      : `Create focused C++17 tests for the current solve function. Target exactly one mistake or difficulty.\n${mistakeContext}\nUser specifics: ${specifics || 'Cover normal input, one edge case, and the recorded mistake.'}\nReturn only a complete tests.cpp file. Use assert, include required headers, declare solve, and do not rewrite the solution.`;
+      ? `Create one focused C++ coding exercise. Focus on exactly one mistake or difficulty, not a broad curriculum.\n${mistakeContext}\nUser specifics: ${specifics || 'Choose the most relevant unreviewed mistake.'}\nReturn only a complete main.cpp file. Use standard C++23, include required headers, provide a clear problem comment and function signature, and leave TODO guidance without including the solution.`
+      : `Create focused C++23 tests for the current solve function. Target exactly one mistake or difficulty.\n${mistakeContext}\nUser specifics: ${specifics || 'Cover normal input, one edge case, and the recorded mistake.'}\nReturn only a complete tests.cpp file. Use assert, include required headers, declare solve, and do not rewrite the solution.`;
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -395,7 +395,7 @@ const CodeEditorPage = () => {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Interactive Code Workspace</h1>
-          <p className="text-xs text-[#8a8f98] mt-1">C++17 & JavaScript practice sandbox linked to your VS Code local tree</p>
+          <p className="text-xs text-[#8a8f98] mt-1">C++23 practice sandbox linked to your VS Code local tree</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Connect Workspace - Tertiary (ghost button) */}

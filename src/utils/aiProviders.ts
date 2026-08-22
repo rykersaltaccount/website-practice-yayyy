@@ -11,10 +11,13 @@ export interface AiConfig {
 }
 
 export interface GeneratedExercise {
+  type: 'question' | 'coding';
   level: string;
   prompt: string;
   hint: string;
   acceptedAnswers: string[];
+  starterCode?: string;
+  validationTokens?: string[];
 }
 
 const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
@@ -57,7 +60,7 @@ export const generateExercises = async (concept: Concept, task: 'practice' | 'te
   if (!config.apiKey.trim() && config.provider !== 'ollama') return null;
   if (!config.endpoint.trim() || !config.model.trim()) return null;
 
-  const instruction = `Generate exactly ${task === 'test' ? 5 : 3} programming exercises for the concept "${concept.name}". ${difficulty ? `Difficulty: ${difficulty}.` : 'Progress from foundational to advanced.'} Use this concept context: ${concept.description}. Time complexity: ${concept.timeComplexity || 'unknown'}. Return ONLY valid JSON: {"exercises":[{"level":"...","prompt":"...","hint":"...","acceptedAnswers":["keyword1","keyword2"]}]}. acceptedAnswers must contain concepts a correct free-text answer should mention.`;
+  const instruction = `Generate exactly ${task === 'test' ? 5 : 3} ORIGINAL programming exercises for the concept "${concept.name}". ${difficulty ? `Difficulty: ${difficulty}.` : 'Progress from foundational to advanced.'} Use this concept context: ${concept.description}. Time complexity: ${concept.timeComplexity || 'unknown'}. Mix conceptual questions and C++ coding problems; at least one exercise must have type "coding". Every coding task must require a self-contained C++23 solution with a clear function or main-program requirement, starterCode, and validationTokens containing 2-5 distinctive implementation tokens. Do not reproduce, paraphrase, or reference any known LeetCode, HackerRank, Codewars, interview, textbook, or common online exercise. Invent a novel scenario specific to this concept. Return ONLY valid JSON: {"exercises":[{"type":"question|coding","level":"...","prompt":"...","hint":"...","acceptedAnswers":["keyword1"],"starterCode":"...","validationTokens":["functionName","distinctiveToken"]}]}. For coding items, acceptedAnswers may be empty.`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let url = config.endpoint;
   let body: string;
@@ -79,9 +82,35 @@ export const generateExercises = async (concept: Concept, task: 'practice' | 'te
       : data.choices?.[0]?.message?.content;
     if (!text) throw new Error('AI provider returned no exercise content');
     const parsed = extractJson(text) as { exercises?: GeneratedExercise[] };
-    return parsed.exercises?.filter(exercise => exercise.prompt && exercise.acceptedAnswers?.length) || null;
+    return parsed.exercises?.filter(exercise => exercise.prompt && (exercise.type === 'coding' || exercise.acceptedAnswers?.length)) || null;
   } catch (error) {
     console.warn('AI exercise generation failed; using local exercises.', error);
+    return null;
+  }
+};
+
+export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test'): Promise<boolean | null> => {
+  const config = getAiConfig(task);
+  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
+  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON {"passed":true} or {"passed":false}. The answer must be a correct compilable C++23 implementation of the requested behavior, not merely contain keywords. Exercise: ${exercise.prompt}. Rubric tokens: ${(exercise.validationTokens || []).join(', ')}. Submitted C++23 code:\n${answer}`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let url = config.endpoint;
+  let body: string;
+  if (config.provider === 'gemini') {
+    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+    body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } });
+  } else {
+    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
+    body = JSON.stringify({ model: config.model, temperature: 0, messages: [{ role: 'system', content: 'You are a strict code exercise grader. Accept only correct implementations.' }, { role: 'user', content: instruction }] });
+  }
+  try {
+    const response = await fetch(url, { method: 'POST', headers, body });
+    if (!response.ok) return null;
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
+    if (!text) return null;
+    return Boolean((extractJson(text) as { passed?: boolean }).passed);
+  } catch {
     return null;
   }
 };

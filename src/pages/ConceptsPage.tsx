@@ -2,7 +2,7 @@ import React, { useState, useContext } from 'react';
 import AppContext from '../contexts/AppContext';
 import type { Concept } from '../types';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { generateExercises } from '../utils/aiProviders';
+import { generateExercises, gradeCodingExercise } from '../utils/aiProviders';
 
 const CONCEPT_NOTE_TEMPLATE = `What is it?
 
@@ -20,10 +20,13 @@ Key takeaways:
 `;
 
 interface Exercise {
+  type: 'question' | 'coding';
   level: string;
   prompt: string;
   hint: string;
   acceptedAnswers: string[];
+  starterCode?: string;
+  validationTokens?: string[];
 }
 
 type PracticeDifficulty = 'Easy' | 'Medium' | 'Hard';
@@ -32,33 +35,35 @@ const buildExercises = (concept: Concept, difficulty?: PracticeDifficulty): Exer
   const name = concept.name;
   const description = concept.description || `the core idea behind ${name}`;
   const complexity = concept.timeComplexity || 'the expected time complexity';
-  const exercises = [
+  const exercises: Exercise[] = [
     {
-      level: 'Foundations',
+      type: 'question', level: 'Foundations',
       prompt: `In one sentence, what problem does ${name} solve?`,
       hint: 'Start with the purpose, not the implementation.',
       acceptedAnswers: [name.toLowerCase(), ...description.toLowerCase().split(/\W+/).filter(word => word.length > 4).slice(0, 3)],
     },
     {
-      level: 'Core mechanics',
+      type: 'question', level: 'Core mechanics',
       prompt: `Describe the core mechanism or invariant that makes ${name} work.`,
       hint: 'Name the state, rule, or operation that must remain true.',
       acceptedAnswers: [name.toLowerCase(), ...description.toLowerCase().split(/\W+/).filter(word => word.length > 5).slice(1, 4)],
     },
     {
-      level: 'Application',
-      prompt: `Give a practical situation where you would choose ${name} over a simpler approach.`,
-      hint: 'Mention the constraint or benefit that drives the choice.',
-      acceptedAnswers: [name.toLowerCase(), 'performance', 'efficient', 'constraint', 'scale'],
+      type: 'coding', level: 'Application',
+      prompt: `Write a C++23 solution for an original practical scenario where ${name} is preferable to a simpler approach.`,
+      hint: 'Implement the requested behavior in C++23 and explain your trade-off in a comment.',
+      acceptedAnswers: [],
+      starterCode: `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // Implement the solution in C++23.\n    return 0;\n}\n`,
+      validationTokens: ['#include', 'return 0'],
     },
     {
-      level: 'Complexity',
+      type: 'question', level: 'Complexity',
       prompt: `What time or space complexity should you expect when using ${name}?`,
       hint: 'Use Big-O notation when you can.',
       acceptedAnswers: [complexity.toLowerCase(), 'o(', 'complexity', 'linear', 'constant', 'log'],
     },
     {
-      level: 'Advanced synthesis',
+      type: 'question', level: 'Advanced synthesis',
       prompt: `Explain one trade-off, edge case, or failure mode an expert should consider with ${name}.`,
       hint: 'A strong answer names both the risk and how you would handle it.',
       acceptedAnswers: ['trade-off', 'tradeoff', 'edge', 'case', 'failure', 'risk', 'memory', 'performance', name.toLowerCase()],
@@ -85,6 +90,9 @@ const ConceptsPage: React.FC = () => {
   const [practiceConcept, setPracticeConcept] = useState<Concept | null>(null);
   const [practiceDifficulty, setPracticeDifficulty] = useState<PracticeDifficulty>('Medium');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+  const [codeAnswer, setCodeAnswer] = useState('');
+  const [assessmentTask, setAssessmentTask] = useState<'practice' | 'test'>('test');
 
   const getRelatedProblems = (conceptId: string) => {
     const concept = concepts.find(c => c.id === conceptId);
@@ -112,11 +120,13 @@ const ConceptsPage: React.FC = () => {
 
   const startConceptTest = async (concept: Concept) => {
     setIsGenerating(true);
+    setAssessmentTask('test');
     const generated = await generateExercises(concept, 'test');
     setTestConcept(concept);
     setTestExercises(generated || buildExercises(concept));
     setTestIndex(0);
     setTestAnswer('');
+    setCodeAnswer(generated?.[0]?.type === 'coding' ? generated[0].starterCode || '' : '');
     setTestResult('idle');
     setIsGenerating(false);
   };
@@ -124,12 +134,14 @@ const ConceptsPage: React.FC = () => {
   const startPractice = async () => {
     if (!practiceConcept) return;
     setIsGenerating(true);
+    setAssessmentTask('practice');
     const concept = practiceConcept;
     const generated = await generateExercises(concept, 'practice', practiceDifficulty);
     setTestConcept(concept);
     setTestExercises(generated || buildExercises(concept, practiceDifficulty));
     setTestIndex(0);
     setTestAnswer('');
+    setCodeAnswer(generated?.[0]?.type === 'coding' ? generated[0].starterCode || '' : '');
     setTestResult('idle');
     setPracticeConcept(null);
     setIsGenerating(false);
@@ -141,10 +153,15 @@ const ConceptsPage: React.FC = () => {
     setTestResult('idle');
   };
 
-  const submitExercise = () => {
-    const answer = testAnswer.trim().toLowerCase();
+  const submitExercise = async () => {
     const exercise = testExercises[testIndex];
-    const passed = answer.length >= 12 && exercise.acceptedAnswers.some(keyword => answer.includes(keyword));
+    const answer = (exercise.type === 'coding' ? codeAnswer : testAnswer).trim().toLowerCase();
+    setIsChecking(true);
+    const aiGrade = exercise.type === 'coding' ? await gradeCodingExercise(exercise, codeAnswer, assessmentTask) : null;
+    const passed = exercise.type === 'coding'
+      ? (aiGrade ?? (codeAnswer.trim().length >= 30 && (exercise.validationTokens || []).every(token => codeAnswer.toLowerCase().includes(token.toLowerCase()))))
+      : answer.length >= 12 && exercise.acceptedAnswers.some(keyword => answer.includes(keyword));
+    setIsChecking(false);
     if (!passed || !testConcept) {
       if (testConcept) {
         updateConcept(testConcept.id, {
@@ -167,6 +184,7 @@ const ConceptsPage: React.FC = () => {
     }
     setTestIndex(index => index + 1);
     setTestAnswer('');
+    setCodeAnswer('');
   };
 
   const handleSaveConceptDetails = (event: React.FormEvent<HTMLFormElement>) => {
@@ -371,7 +389,7 @@ const ConceptsPage: React.FC = () => {
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-[#c084fc]">Progressive assessment</p>
                 <h2 className="mt-1 text-lg font-bold text-white">{testConcept.name} mastery test</h2>
-                <p className="mt-1 text-xs text-[#8a8f98]">Basics to advanced synthesis · pass every exercise to master it</p>
+                <p className="mt-1 text-xs text-[#8a8f98]">C++23 basics to advanced synthesis · pass every exercise to master it</p>
               </div>
               <button type="button" onClick={closeConceptTest} className="text-[#8a8f98] hover:text-white" aria-label="Close test">✕</button>
             </div>
@@ -401,11 +419,17 @@ const ConceptsPage: React.FC = () => {
                 </div>
                 <div className="h-1 rounded-full bg-white/[0.08]"><div className="h-full rounded-full bg-[#c084fc] transition-all" style={{ width: `${((testIndex + 1) / testExercises.length) * 100}%` }} /></div>
                 <div>
+                  <span className="mb-2 inline-flex rounded bg-[#06b6d4]/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#67e8f9]">{testExercises[testIndex].type === 'coding' ? 'Coding exercise' : 'Concept question'}</span>
                   <h3 className="text-base font-semibold leading-relaxed text-white">{testExercises[testIndex].prompt}</h3>
                   <p className="mt-2 text-xs text-[#8a8f98]">Hint: {testExercises[testIndex].hint}</p>
                 </div>
-                <textarea value={testAnswer} onChange={event => setTestAnswer(event.target.value)} rows={5} autoFocus className="linear-input w-full resize-none p-3 text-sm leading-relaxed" placeholder="Write your answer..." required />
-                <div className="flex justify-end"><button type="submit" disabled={isGenerating} className="linear-btn-primary px-4 py-2 text-xs font-semibold">{isGenerating ? 'Generating...' : testIndex === testExercises.length - 1 ? 'Finish test' : 'Check answer'}</button></div>
+                {testExercises[testIndex].type === 'coding' ? (
+                  <div>
+                    <p className="mb-2 text-[11px] text-[#8a8f98]">Complete the starter code using C++23. Your solution is evaluated for behavior by the configured AI grader.</p>
+                    <textarea value={codeAnswer} onChange={event => setCodeAnswer(event.target.value)} rows={10} autoFocus className="linear-input w-full resize-y p-3 font-mono text-xs leading-relaxed" placeholder="Write your C++23 solution..." required />
+                  </div>
+                ) : <textarea value={testAnswer} onChange={event => setTestAnswer(event.target.value)} rows={5} autoFocus className="linear-input w-full resize-none p-3 text-sm leading-relaxed" placeholder="Write your answer..." required />}
+                <div className="flex justify-end"><button type="submit" disabled={isGenerating || isChecking} className="linear-btn-primary px-4 py-2 text-xs font-semibold">{isGenerating || isChecking ? 'Checking...' : testIndex === testExercises.length - 1 ? 'Finish test' : 'Check answer'}</button></div>
               </form>
             )}
           </div>
