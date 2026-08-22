@@ -8,7 +8,10 @@ const tasks: Array<{ id: AiTask; label: string; description: string }> = [
   { id: 'practice', label: 'Practice exercises', description: 'Short targeted drills at your chosen difficulty.' },
   { id: 'test', label: 'Mastery tests', description: 'Five-level assessments that can mark a concept mastered.' },
   { id: 'helper', label: 'AI Helper', description: 'Workspace analysis, advice, and issue creation.' },
-  { id: 'course', label: 'Course generation', description: 'Syllabi, long-form lessons, and original drills.' },
+  { id: 'course-syllabus', label: 'Course syllabus', description: 'Fast module and lesson planning with Llama 3.3 70B.' },
+  { id: 'course-lesson', label: 'Lesson structure', description: 'Deep C++23 reasoning, checks, drills, and capstones with DeepSeek-R1.' },
+  { id: 'course-reading', label: 'Long-form readings', description: '1,000+ word technical readings with Nemotron-3.' },
+  { id: 'course-grading', label: 'Course grading', description: 'Fast drill grading with Llama 3.3 70B.' },
 ];
 
 const AiSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {

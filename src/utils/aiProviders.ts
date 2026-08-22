@@ -1,7 +1,7 @@
 import type { Concept } from '../types';
 import type { Course, Lesson } from '../types/course';
 
-export type AiTask = 'practice' | 'test' | 'helper' | 'course';
+export type AiTask = 'practice' | 'test' | 'helper' | 'course' | 'course-syllabus' | 'course-lesson' | 'course-reading' | 'course-grading';
 export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
 
 export interface AiConfig {
@@ -30,6 +30,13 @@ const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
   custom: { provider: 'custom', endpoint: '', model: '' },
 };
 
+const courseModels: Record<Extract<AiTask, `course-${string}`>, AiConfig> = {
+  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
+  'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'deepseek-ai/deepseek-r1' },
+  'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'nvidia/nemotron-3-nano-30b-a3b' },
+  'course-grading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
+};
+
 const storageKey = 'codevault-ai-configs';
 
 const readConfigs = (): Partial<Record<AiTask, AiConfig>> => {
@@ -45,6 +52,8 @@ export const getAiConfig = (task: AiTask): AiConfig => {
   const saved = readConfigs();
   const config = saved[task];
   if (config) return { ...config, apiKey: config.apiKey || '' };
+
+  if (task in courseModels) return { ...courseModels[task as keyof typeof courseModels] };
 
   // Migrate settings saved by the original AI Helper panel.
   if (task === 'helper') {
@@ -144,13 +153,13 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3)
 };
 
 export const generateCourseSyllabus = async (topic: string, level: Course['level']): Promise<Course | null> => {
-  const result = await requestJson('course', `Create a structured C++23 systems programming course about "${topic}" for ${level} learners. Return only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Do not use a marketing tone.`, 0.2) as Omit<Course, 'id' | 'createdAt' | 'overallProgress'> | null;
+  const result = await requestJson('course-syllabus', `Create a structured C++23 systems programming course about "${topic}" for ${level} learners. Return only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for a later deep lesson writer. Do not use a marketing tone.`, 0.2) as Omit<Course, 'id' | 'createdAt' | 'overallProgress'> | null;
   if (!result?.title || !Array.isArray(result.modules)) return null;
   return { ...result, id: crypto.randomUUID(), createdAt: new Date().toISOString(), overallProgress: 0 };
 };
 
 export const generateCourseLesson = async (course: Course, lessonTitle: string): Promise<Lesson | null> => {
-  const result = await requestJson('course', `SYSTEM ROLE:
+  const result = await requestJson('course-lesson', `SYSTEM ROLE:
 You are a principal systems software engineer and expert C++23 educator creating rigorous, interactive course material for focused deep work. Generate a complete lesson for the course context below. Reason privately about correctness, standards, memory behavior, and edge cases, but never reveal chain-of-thought or hidden reasoning.
 
 CONTENT REQUIREMENTS:
@@ -172,11 +181,12 @@ LESSON CONTEXT:
 - Course description: ${course.description}
 
 Every code sample, starter, and solution must compile under C++23 standard parameters with no third-party dependencies.`, 0.35) as Partial<Lesson> | null;
-  if (!result?.contentMarkdown || !Array.isArray(result.drills)) return null;
-  return { id: '', title: lessonTitle, isCompleted: false, bestScore: 0, ...result };
+  if (!result || !Array.isArray(result.drills)) return null;
+  const reading = await requestJson('course-reading', `Write only the contentMarkdown field for the C++23 lesson "${lessonTitle}" in the course "${course.title}". Produce a 1,000-1,500 word, zero-fluff technical reading. Explain modern C++23 behavior, memory/lifetime/layout mechanics, cache locality, allocation, value categories, move semantics, and compiler implications only where relevant. Include compilable code examples and at least one readable ASCII diagram. Do not copy or paraphrase known online material. Return only JSON: {"contentMarkdown":"..."}. Do not reveal chain-of-thought.`, 0.3) as { contentMarkdown?: string } | null;
+  return { id: '', title: lessonTitle, isCompleted: false, bestScore: 0, ...result, contentMarkdown: reading?.contentMarkdown || result.contentMarkdown || '' };
 };
 
-export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test'): Promise<boolean | null> => {
+export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<boolean | null> => {
   const config = getAiConfig(task);
   if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
   const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON {"passed":true} or {"passed":false}. The answer must be a correct compilable C++23 implementation of the requested behavior, not merely contain keywords. Exercise: ${exercise.prompt}. Rubric tokens: ${(exercise.validationTokens || []).join(', ')}. Submitted C++23 code:\n${answer}`;

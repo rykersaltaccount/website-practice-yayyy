@@ -59,7 +59,7 @@ const CourseRunnerPage: React.FC = () => {
     } catch {
       compilerPassed = true;
     }
-    const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: activeDrill.starterCode, validationTokens: activeDrill.gradingTokens }, code, 'test');
+    const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: activeDrill.starterCode, validationTokens: activeDrill.gradingTokens }, code, 'course-grading');
     const passed = compilerPassed && (aiPassed ?? (code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token))));
     if (passed) { setFeedback('Drill passed.'); if (drillIndex === drills.length - 1) saveLesson({ isCompleted: true, bestScore: Math.max(lesson.bestScore, 100) }); else setDrillIndex(index => index + 1); setCode(''); }
     else { setFeedback('The solution did not pass. Review the compiler output and try again.'); addMistake({ description: `Failed course drill: ${activeDrill.title}`, example: code || 'No code submitted.', relatedConcept: '', relatedProblems: [], learningLog: 'Review the lesson and retry the drill.', reviewedRecently: false }); }
