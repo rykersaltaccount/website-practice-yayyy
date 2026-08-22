@@ -1,6 +1,7 @@
-﻿import { createContext, useState, useEffect } from 'react';
+﻿import { createContext, useState, useEffect, useContext } from 'react';
 import type { Problem, Note, Concept, Mistake } from '../types';
 import type { ReactNode } from 'react';
+import AuthContext, { supabase } from './AuthContext';
 
 interface AppContextType {
   problems: Problem[];
@@ -34,7 +35,30 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+type CollectionName = 'problems' | 'notes' | 'concepts' | 'mistakes';
+type CollectionItem = Problem | Note | Concept | Mistake;
+
+const saveToSupabase = async (collection: CollectionName, userId: string, item: CollectionItem) => {
+  if (!supabase) return;
+
+  const { error } = await supabase.from(collection).upsert({
+    id: item.id,
+    user_id: userId,
+    data: item,
+  });
+
+  if (error) console.error(`Unable to save ${collection.slice(0, -1)}:`, error);
+};
+
+const deleteFromSupabase = async (collection: CollectionName, userId: string, id: string) => {
+  if (!supabase) return;
+
+  const { error } = await supabase.from(collection).delete().eq('id', id).eq('user_id', userId);
+  if (error) console.error(`Unable to delete ${collection.slice(0, -1)}:`, error);
+};
+
 export const AppProvider = ({ children }: { children: ReactNode }) => {
+  const { user } = useContext(AuthContext)!;
   const [problems, setProblems] = useState<Problem[]>(() => {
     const saved = localStorage.getItem('codevault-problems');
     if (saved) {
@@ -87,6 +111,45 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return [];
   });
 
+  useEffect(() => {
+    if (!user || !supabase) return;
+
+    let cancelled = false;
+    const loadUserData = async () => {
+      const collections: CollectionName[] = ['problems', 'notes', 'concepts', 'mistakes'];
+      const results = await Promise.all(collections.map(async collection => {
+        const { data, error } = await supabase!.from(collection).select('id, data').eq('user_id', user.id);
+        return { collection, data: data as Array<{ id: string; data: CollectionItem }> | null, error };
+      }));
+
+      if (cancelled) return;
+
+      for (const result of results) {
+        if (result.error) {
+          console.error(`Unable to load ${result.collection}:`, result.error);
+          continue;
+        }
+
+        const remoteItems = (result.data || []).map(row => ({ ...row.data, id: row.id }));
+        const localItems = remoteItems.length === 0
+          ? JSON.parse(localStorage.getItem(`codevault-${result.collection}`) || '[]') as CollectionItem[]
+          : [];
+        if (localItems.length > 0) {
+          await Promise.all(localItems.map(item => saveToSupabase(result.collection, user.id, item)));
+        }
+        const items = remoteItems.length > 0 ? remoteItems : localItems;
+
+        if (result.collection === 'problems') setProblems(items as Problem[]);
+        if (result.collection === 'notes') setNotes(items as Note[]);
+        if (result.collection === 'concepts') setConcepts(items as Concept[]);
+        if (result.collection === 'mistakes') setMistakes(items as Mistake[]);
+      }
+    };
+
+    void loadUserData();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
   // Save to localStorage whenever state changes
   useEffect(() => {
     try {
@@ -135,6 +198,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       dateSolved: problem.dateSolved || new Date().toISOString(),
     };
     setProblems(prev => [newProblem, ...prev]);
+    if (user) void saveToSupabase('problems', user.id, newProblem);
   };
 
   const loadDemoProblems = () => {
@@ -177,10 +241,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       };
     });
 
-    setProblems(prev => [
-      ...prev.filter(problem => !problem.title.startsWith('[Demo]')),
-      ...demoProblems,
-    ]);
+    setProblems(prev => {
+      const updated = [
+        ...prev.filter(problem => !problem.title.startsWith('[Demo]')),
+        ...demoProblems,
+      ];
+      if (user) void Promise.all(demoProblems.map(problem => saveToSupabase('problems', user.id, problem)));
+      return updated;
+    });
   };
 
   const clearDemoProblems = () => {
@@ -188,15 +256,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateProblem = (id: string, updates: Partial<Problem>) => {
-    setProblems(prev =>
-      prev.map(problem =>
-        problem.id === id ? { ...problem, ...updates } : problem
-      )
-    );
+    setProblems(prev => {
+      const updated = prev.map(problem => problem.id === id ? { ...problem, ...updates } : problem);
+      const item = updated.find(problem => problem.id === id);
+      if (user && item) void saveToSupabase('problems', user.id, item);
+      return updated;
+    });
   };
 
   const deleteProblem = (id: string) => {
     setProblems(prev => prev.filter(problem => problem.id !== id));
+    if (user) void deleteFromSupabase('problems', user.id, id);
   };
 
   // Note functions
@@ -208,18 +278,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       updatedAt: new Date().toISOString(),
     };
     setNotes(prev => [newNote, ...prev]);
+    if (user) void saveToSupabase('notes', user.id, newNote);
   };
 
   const updateNote = (id: string, updates: Partial<Note>) => {
-    setNotes(prev =>
-      prev.map(note =>
-        note.id === id ? { ...note, ...updates, updatedAt: new Date().toISOString() } : note
-      )
-    );
+    setNotes(prev => {
+      const updated = prev.map(note => note.id === id ? { ...note, ...updates, updatedAt: new Date().toISOString() } : note);
+      const item = updated.find(note => note.id === id);
+      if (user && item) void saveToSupabase('notes', user.id, item);
+      return updated;
+    });
   };
 
   const deleteNote = (id: string) => {
     setNotes(prev => prev.filter(note => note.id !== id));
+    if (user) void deleteFromSupabase('notes', user.id, id);
   };
 
   // Concept functions
@@ -229,18 +302,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       id: crypto.randomUUID(),
     };
     setConcepts(prev => [newConcept, ...prev]);
+    if (user) void saveToSupabase('concepts', user.id, newConcept);
   };
 
   const updateConcept = (id: string, updates: Partial<Concept>) => {
-    setConcepts(prev =>
-      prev.map(concept =>
-        concept.id === id ? { ...concept, ...updates } : concept
-      )
-    );
+    setConcepts(prev => {
+      const updated = prev.map(concept => concept.id === id ? { ...concept, ...updates } : concept);
+      const item = updated.find(concept => concept.id === id);
+      if (user && item) void saveToSupabase('concepts', user.id, item);
+      return updated;
+    });
   };
 
   const deleteConcept = (id: string) => {
     setConcepts(prev => prev.filter(concept => concept.id !== id));
+    if (user) void deleteFromSupabase('concepts', user.id, id);
   };
 
   // Mistake functions
@@ -251,26 +327,30 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       reviewedRecently: false,
     };
     setMistakes(prev => [newMistake, ...prev]);
+    if (user) void saveToSupabase('mistakes', user.id, newMistake);
   };
 
   const updateMistake = (id: string, updates: Partial<Mistake>) => {
-    setMistakes(prev =>
-      prev.map(mistake =>
-        mistake.id === id ? { ...mistake, ...updates } : mistake
-      )
-    );
+    setMistakes(prev => {
+      const updated = prev.map(mistake => mistake.id === id ? { ...mistake, ...updates } : mistake);
+      const item = updated.find(mistake => mistake.id === id);
+      if (user && item) void saveToSupabase('mistakes', user.id, item);
+      return updated;
+    });
   };
 
   const deleteMistake = (id: string) => {
     setMistakes(prev => prev.filter(mistake => mistake.id !== id));
+    if (user) void deleteFromSupabase('mistakes', user.id, id);
   };
 
   const toggleReviewed = (id: string) => {
-    setMistakes(prev =>
-      prev.map(mistake =>
-        mistake.id === id ? { ...mistake, reviewedRecently: !mistake.reviewedRecently } : mistake
-      )
-    );
+    setMistakes(prev => {
+      const updated = prev.map(mistake => mistake.id === id ? { ...mistake, reviewedRecently: !mistake.reviewedRecently } : mistake);
+      const item = updated.find(mistake => mistake.id === id);
+      if (user && item) void saveToSupabase('mistakes', user.id, item);
+      return updated;
+    });
   };
 
   return (

@@ -22,7 +22,7 @@ const getSupabaseAnonKey = (): string => {
 };
 
 // Initialize Supabase client
-let supabase: SupabaseClient | null = null;
+export let supabase: SupabaseClient | null = null;
 if (typeof window !== 'undefined') {
   const url = getSupabaseUrl();
   const key = getSupabaseAnonKey();
@@ -121,7 +121,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       async (_event, session) => {
         if (session?.user) {
           // User signed in
-          const { data: userData, error } = await supabase
+          const { data: userData, error } = await supabase!
             .from('users')
             .select('*')
             .eq('id', session.user.id)
@@ -146,7 +146,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               createdAt: session.user.created_at || new Date().toISOString(),
             };
             
-            await supabase
+            await supabase!
               .from('users')
               .upsert(newUser, { onConflict: 'id' });
               
