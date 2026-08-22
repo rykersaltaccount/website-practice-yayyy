@@ -17,10 +17,18 @@ const CourseLibraryPage: React.FC = () => {
     if (!topic.trim()) return;
     setIsGenerating(true);
     setError('');
-    const generated = await generateCourseSyllabus(topic.trim(), level);
-    if (generated) addCourse(generated);
-    else setError('Configure the Course Generation provider in AI settings, then try again.');
-    if (generated) { setShowForm(false); setTopic(''); }
+    try {
+      const generated = await generateCourseSyllabus(topic.trim(), level);
+      if (generated) {
+        addCourse(generated);
+        setShowForm(false);
+        setTopic('');
+      } else {
+        setError('The provider returned an invalid syllabus. Try again or choose another model.');
+      }
+    } catch (generationError) {
+      setError(generationError instanceof Error ? generationError.message : 'Course generation failed.');
+    }
     setIsGenerating(false);
   };
 

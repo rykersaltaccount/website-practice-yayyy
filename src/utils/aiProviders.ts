@@ -130,7 +130,9 @@ export const generateExercises = async (
 
 const requestJson = async (task: AiTask, instruction: string, temperature = 0.3): Promise<unknown | null> => {
   const config = getAiConfig(task);
-  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
+  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) {
+    throw new Error(`The ${task} profile is missing an endpoint, model, or API key.`);
+  }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let url = config.endpoint;
   let body: string;
@@ -143,12 +145,16 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3)
   }
   try {
     const response = await fetch(url, { method: 'POST', headers, body });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 240);
+      throw new Error(`${config.provider} returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+    }
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
     return text ? extractJson(text) : null;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error(`Could not reach ${config.provider}. Check the endpoint and browser network access.`);
   }
 };
 
