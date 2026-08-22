@@ -31,20 +31,41 @@ const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
 
 const storageKey = 'codevault-ai-configs';
 
-export const getAiConfig = (task: AiTask): AiConfig => {
+const readConfigs = (): Partial<Record<AiTask, AiConfig>> => {
   try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}') as Partial<Record<AiTask, AiConfig>>;
-    const config = saved[task];
-    if (config) return { ...config, apiKey: config.apiKey || '' };
+    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    return saved && typeof saved === 'object' ? saved as Partial<Record<AiTask, AiConfig>> : {};
   } catch {
-    // Use defaults when saved settings are unreadable.
+    return {};
+  }
+};
+
+export const getAiConfig = (task: AiTask): AiConfig => {
+  const saved = readConfigs();
+  const config = saved[task];
+  if (config) return { ...config, apiKey: config.apiKey || '' };
+
+  // Migrate settings saved by the original AI Helper panel.
+  if (task === 'helper') {
+    const legacyKey = localStorage.getItem('codevault-ai-key');
+    const legacyEndpoint = localStorage.getItem('codevault-ai-endpoint');
+    const legacyModel = localStorage.getItem('codevault-ai-model');
+    const legacyProvider = localStorage.getItem('codevault-ai-provider') as AiProvider | null;
+    if (legacyKey || legacyEndpoint || legacyModel || legacyProvider) {
+      return {
+        provider: legacyProvider && legacyProvider in defaults ? legacyProvider : 'chatgpt',
+        apiKey: legacyKey || '',
+        endpoint: legacyEndpoint || defaults.chatgpt.endpoint,
+        model: legacyModel || defaults.chatgpt.model,
+      };
+    }
   }
   return { ...defaults.chatgpt, apiKey: '' };
 };
 
 export const saveAiConfig = (task: AiTask, config: AiConfig) => {
-  const saved = JSON.parse(localStorage.getItem(storageKey) || '{}') as Partial<Record<AiTask, AiConfig>>;
-  localStorage.setItem(storageKey, JSON.stringify({ ...saved, [task]: config }));
+  const saved = readConfigs();
+  localStorage.setItem(storageKey, JSON.stringify({ ...saved, [task]: { ...config, apiKey: config.apiKey.trim() } }));
   window.dispatchEvent(new CustomEvent('ai-settings-updated'));
 };
 
