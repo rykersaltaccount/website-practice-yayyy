@@ -160,7 +160,7 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
     let response: Response;
     try {
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 30000);
+      const timeout = window.setTimeout(() => controller.abort(), 120000);
       response = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
