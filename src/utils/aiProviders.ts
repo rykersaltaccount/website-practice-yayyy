@@ -137,8 +137,11 @@ export const generateExercises = async (
   }
 };
 
-const requestJson = async (task: AiTask, instruction: string, temperature = 0.3): Promise<unknown | null> => {
+type GenerationProgress = (message: string) => void;
+
+const requestJson = async (task: AiTask, instruction: string, temperature = 0.3, onProgress?: GenerationProgress): Promise<unknown | null> => {
   const config = getAiConfig(task);
+  onProgress?.(`Preparing ${task} provider...`);
   if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) {
     throw new Error(`The ${task} profile is missing an endpoint, model, or API key.`);
   }
@@ -153,6 +156,7 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3)
     body = JSON.stringify({ model: config.model, temperature, messages: [{ role: 'system', content: 'You are a precise C++23 systems programming course author.' }, { role: 'user', content: instruction }] });
   }
   try {
+    onProgress?.(`Sending request to ${config.model}...`);
     let response: Response;
     try {
       response = await fetch('/api/ai', {
@@ -167,6 +171,7 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3)
       const detail = (await response.text()).slice(0, 240);
       throw new Error(`${config.provider} returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
     }
+    onProgress?.('Response received. Parsing structured output...');
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
     return text ? extractJson(text) : null;
@@ -176,13 +181,13 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3)
   }
 };
 
-export const generateCourseSyllabus = async (topic: string, level: Course['level']): Promise<Course | null> => {
-  const result = await requestJson('course-syllabus', `Create a structured C++23 systems programming course about "${topic}" for ${level} learners. Return only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for a later deep lesson writer. Do not use a marketing tone.`, 0.2) as Omit<Course, 'id' | 'createdAt' | 'overallProgress'> | null;
+export const generateCourseSyllabus = async (topic: string, level: Course['level'], onProgress?: GenerationProgress): Promise<Course | null> => {
+  const result = await requestJson('course-syllabus', `Create a structured C++23 systems programming course about "${topic}" for ${level} learners. Return only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for a later deep lesson writer. Do not use a marketing tone.`, 0.2, onProgress) as Omit<Course, 'id' | 'createdAt' | 'overallProgress'> | null;
   if (!result?.title || !Array.isArray(result.modules)) return null;
   return { ...result, id: crypto.randomUUID(), createdAt: new Date().toISOString(), overallProgress: 0 };
 };
 
-export const generateCourseLesson = async (course: Course, lessonTitle: string): Promise<Lesson | null> => {
+export const generateCourseLesson = async (course: Course, lessonTitle: string, onProgress?: GenerationProgress): Promise<Lesson | null> => {
   const result = await requestJson('course-lesson', `SYSTEM ROLE:
 You are a principal systems software engineer and expert C++23 educator creating rigorous, interactive course material for focused deep work. Generate a complete lesson for the course context below. Reason privately about correctness, standards, memory behavior, and edge cases, but never reveal chain-of-thought or hidden reasoning.
 
@@ -204,9 +209,10 @@ LESSON CONTEXT:
 - Lesson: ${lessonTitle}
 - Course description: ${course.description}
 
-Every code sample, starter, and solution must compile under C++23 standard parameters with no third-party dependencies.`, 0.35) as Partial<Lesson> | null;
+Every code sample, starter, and solution must compile under C++23 standard parameters with no third-party dependencies.`, 0.35, onProgress) as Partial<Lesson> | null;
   if (!result || !Array.isArray(result.drills)) return null;
-  const reading = await requestJson('course-reading', `Write only the contentMarkdown field for the C++23 lesson "${lessonTitle}" in the course "${course.title}". Produce a 1,000-1,500 word, zero-fluff technical reading. Explain modern C++23 behavior, memory/lifetime/layout mechanics, cache locality, allocation, value categories, move semantics, and compiler implications only where relevant. Include compilable code examples and at least one readable ASCII diagram. Do not copy or paraphrase known online material. Return only JSON: {"contentMarkdown":"..."}. Do not reveal chain-of-thought.`, 0.3) as { contentMarkdown?: string } | null;
+  onProgress?.('Lesson structure complete. Generating long-form reading...');
+  const reading = await requestJson('course-reading', `Write only the contentMarkdown field for the C++23 lesson "${lessonTitle}" in the course "${course.title}". Produce a 1,000-1,500 word, zero-fluff technical reading. Explain modern C++23 behavior, memory/lifetime/layout mechanics, cache locality, allocation, value categories, move semantics, and compiler implications only where relevant. Include compilable code examples and at least one readable ASCII diagram. Do not copy or paraphrase known online material. Return only JSON: {"contentMarkdown":"..."}. Do not reveal chain-of-thought.`, 0.3, onProgress) as { contentMarkdown?: string } | null;
   return { id: '', title: lessonTitle, isCompleted: false, bestScore: 0, ...result, contentMarkdown: reading?.contentMarkdown || result.contentMarkdown || '' };
 };
 
