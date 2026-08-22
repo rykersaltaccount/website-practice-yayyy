@@ -91,6 +91,8 @@ export interface CodingSession {
   deepWorkIntervals?: number;
 }
 
+export type { Course, CourseModule, Lesson, ConceptCheck, Drill, Capstone } from './course';
+
 // Auth types
 export interface User {
   id: string;

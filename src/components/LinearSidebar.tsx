@@ -60,6 +60,14 @@ const LinearSidebar: React.FC<LinearSidebarProps> = ({ onOpenNewItem, onOpenSear
           <ul className="space-y-0.5">
             <li>
               <NavLink
+                to="/courses"
+                className={({ isActive }) => `flex items-center justify-between rounded-md px-2 py-1.5 font-medium transition-colors ${isActive ? 'bg-white/[0.08] text-white shadow-sm' : 'text-[#8a8f98] hover:bg-white/[0.04] hover:text-white'}`}
+              >
+                <div className="flex items-center gap-2.5"><span className="text-[#10b981]">◆</span><span>Courses</span></div>
+              </NavLink>
+            </li>
+            <li>
+              <NavLink
                 to="/"
                 end
                 className={({ isActive }) =>

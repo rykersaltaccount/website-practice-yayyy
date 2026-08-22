@@ -20,6 +20,9 @@ import ConceptsPage from './pages/ConceptsPage';
 import MistakesPage from './pages/MistakesPage';
 import CodeEditorPage from './pages/CodeEditorPage';
 import AiSettingsModal from './components/AiSettingsModal';
+import CourseLibraryPage from './pages/CourseLibraryPage';
+import CourseOverviewPage from './pages/CourseOverviewPage';
+import CourseRunnerPage from './pages/CourseRunnerPage';
 
 function App() {
   const { addProblem } = useContext(AppContext)!;
@@ -129,6 +132,9 @@ function App() {
             <Route path="/concepts" element={<ConceptsPage />} />
             <Route path="/mistakes" element={<MistakesPage />} />
             <Route path="/workspace" element={<CodeEditorPage />} />
+            <Route path="/courses" element={<CourseLibraryPage />} />
+            <Route path="/courses/:courseId" element={<CourseOverviewPage />} />
+            <Route path="/courses/:courseId/lessons/:lessonId" element={<CourseRunnerPage />} />
             <Route
               path="*"
               element={

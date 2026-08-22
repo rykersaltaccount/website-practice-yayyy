@@ -2,6 +2,7 @@
 import type { Problem, Note, Concept, Mistake, CodingSession } from '../types';
 import type { ReactNode } from 'react';
 import AuthContext, { supabase } from './AuthContext';
+import type { Course } from '../types/course';
 
 interface AppContextType {
   problems: Problem[];
@@ -36,6 +37,9 @@ interface AppContextType {
   deleteMistake: (id: string) => void;
   toggleReviewed: (id: string) => void;
   reviewConcept: (id: string) => void;
+  courses: Course[];
+  addCourse: (course: Course) => void;
+  updateCourse: (id: string, updates: Partial<Course>) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -128,6 +132,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [activeCodingStartedAt, setActiveCodingStartedAt] = useState<string | null>(() =>
     localStorage.getItem('codevault-active-coding-start')
   );
+  const [courses, setCourses] = useState<Course[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('codevault-courses') || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     if (!user || !supabase) return;
@@ -210,6 +222,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     else localStorage.removeItem('codevault-active-coding-start');
   }, [activeCodingStartedAt]);
 
+  useEffect(() => {
+    localStorage.setItem('codevault-courses', JSON.stringify(courses));
+  }, [courses]);
+
   const startCoding = () => {
     if (!activeCodingStartedAt) setActiveCodingStartedAt(new Date().toISOString());
   };
@@ -228,6 +244,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setCodingSessions(prev => [...prev, session]);
     setActiveCodingStartedAt(null);
   };
+
+  const addCourse = (course: Course) => setCourses(prev => [course, ...prev]);
+  const updateCourse = (id: string, updates: Partial<Course>) => setCourses(prev => prev.map(course => course.id === id ? { ...course, ...updates } : course));
 
   // Problem functions
   const addProblem = (problem: Omit<Problem, 'id'>) => {
@@ -452,6 +471,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       deleteMistake,
       toggleReviewed,
       reviewConcept,
+      courses,
+      addCourse,
+      updateCourse,
     }}>
       {children}
     </AppContext.Provider>

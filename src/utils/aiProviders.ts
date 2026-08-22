@@ -1,6 +1,7 @@
 import type { Concept } from '../types';
+import type { Course, Lesson } from '../types/course';
 
-export type AiTask = 'practice' | 'test' | 'helper';
+export type AiTask = 'practice' | 'test' | 'helper' | 'course';
 export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
 
 export interface AiConfig {
@@ -116,6 +117,63 @@ export const generateExercises = async (
     console.warn('AI exercise generation failed; using local exercises.', error);
     return null;
   }
+};
+
+const requestJson = async (task: AiTask, instruction: string, temperature = 0.3): Promise<unknown | null> => {
+  const config = getAiConfig(task);
+  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let url = config.endpoint;
+  let body: string;
+  if (config.provider === 'gemini') {
+    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+    body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature, responseMimeType: 'application/json' } });
+  } else {
+    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
+    body = JSON.stringify({ model: config.model, temperature, messages: [{ role: 'system', content: 'You are a precise C++23 systems programming course author.' }, { role: 'user', content: instruction }] });
+  }
+  try {
+    const response = await fetch(url, { method: 'POST', headers, body });
+    if (!response.ok) return null;
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
+    return text ? extractJson(text) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const generateCourseSyllabus = async (topic: string, level: Course['level']): Promise<Course | null> => {
+  const result = await requestJson('course', `Create a structured C++23 systems programming course about "${topic}" for ${level} learners. Return only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Do not use a marketing tone.`, 0.2) as Omit<Course, 'id' | 'createdAt' | 'overallProgress'> | null;
+  if (!result?.title || !Array.isArray(result.modules)) return null;
+  return { ...result, id: crypto.randomUUID(), createdAt: new Date().toISOString(), overallProgress: 0 };
+};
+
+export const generateCourseLesson = async (course: Course, lessonTitle: string): Promise<Lesson | null> => {
+  const result = await requestJson('course', `SYSTEM ROLE:
+You are a principal systems software engineer and expert C++23 educator creating rigorous, interactive course material for focused deep work. Generate a complete lesson for the course context below. Reason privately about correctness, standards, memory behavior, and edge cases, but never reveal chain-of-thought or hidden reasoning.
+
+CONTENT REQUIREMENTS:
+1. Write contentMarkdown as a zero-fluff, technically accurate 1,000-1,500 word guide. Use modern C++23 features only when relevant, such as std::expected, explicit object parameters (deducing this), monadic operations, std::print, concepts, or std::generator. Do not force features that do not serve the lesson.
+2. Explain low-level behavior where relevant: object lifetime, stack/heap boundaries, pointer/reference lifetimes, value categories (xvalue, prvalue), move semantics, allocation, cache locality, and compiler/assembly implications. Avoid unverifiable claims.
+3. Include at least one readable ASCII diagram for a memory layout, control flow, ownership relationship, or state transition. Include compilable C++23 code examples without third-party dependencies.
+4. Include 3-4 conceptual multiple-choice checks. Each must test a distinct mental model, value category, memory rule, or code-output prediction. Provide four options, a zero-based correctIndex, and a useful explanation.
+5. Include 3-4 progressive ORIGINAL C++23 coding drills, from focused fundamentals to applied systems reasoning. Do not reproduce, paraphrase, or reference any known LeetCode, HackerRank, Codewars, interview, textbook, or common online exercise. Invent scenarios specific to this lesson. Each drill must include valid minimal starterCode, a complete reference solution, 2-4 progressive hints, and 2-5 gradingTokens.
+6. Include one original non-trivial C++23 capstone that combines the lesson topics into a small systems task. It must include starterCode, a complete solution, hints, and gradingTokens.
+
+OUTPUT CONTRACT:
+Return raw valid JSON only. Do not use Markdown fences, comments outside JSON, or trailing commas. Escape every quote and newline correctly. Return exactly this shape:
+{"overview":"1-2 sentence summary","contentMarkdown":"...","conceptChecks":[{"id":"cc-1","question":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"..."}],"drills":[{"id":"drill-1","title":"...","instructions":"...","starterCode":"...","solution":"...","hints":["..."],"gradingTokens":["..."]}],"capstone":{"id":"capstone-1","title":"...","instructions":"...","starterCode":"...","solution":"...","hints":["..."],"gradingTokens":["..."]}}
+
+LESSON CONTEXT:
+- Course: ${course.title}
+- Target level: ${course.level}
+- Lesson: ${lessonTitle}
+- Course description: ${course.description}
+
+Every code sample, starter, and solution must compile under C++23 standard parameters with no third-party dependencies.`, 0.35) as Partial<Lesson> | null;
+  if (!result?.contentMarkdown || !Array.isArray(result.drills)) return null;
+  return { id: '', title: lessonTitle, isCompleted: false, bestScore: 0, ...result };
 };
 
 export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test'): Promise<boolean | null> => {

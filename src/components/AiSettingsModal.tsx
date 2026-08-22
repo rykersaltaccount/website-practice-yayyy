@@ -8,6 +8,7 @@ const tasks: Array<{ id: AiTask; label: string; description: string }> = [
   { id: 'practice', label: 'Practice exercises', description: 'Short targeted drills at your chosen difficulty.' },
   { id: 'test', label: 'Mastery tests', description: 'Five-level assessments that can mark a concept mastered.' },
   { id: 'helper', label: 'AI Helper', description: 'Workspace analysis, advice, and issue creation.' },
+  { id: 'course', label: 'Course generation', description: 'Syllabi, long-form lessons, and original drills.' },
 ];
 
 const AiSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
