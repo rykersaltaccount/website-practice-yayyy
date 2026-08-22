@@ -76,7 +76,7 @@ const proxyAiRequest = async (request, response) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(body.headers || {}) },
     body: JSON.stringify(body.body || {}),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(30000),
   });
   response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json' });
   response.end(await upstream.text());

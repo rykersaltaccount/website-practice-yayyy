@@ -14,7 +14,7 @@ export default async function handler(request, response) {
       return;
     }
 
-    const signal = AbortSignal.timeout(120000);
+    const signal = AbortSignal.timeout(30000);
     const upstream = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
@@ -26,7 +26,7 @@ export default async function handler(request, response) {
     response.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
     response.send(text);
   } catch (error) {
-    const message = error?.name === 'TimeoutError' ? 'AI provider request timed out.' : error instanceof Error ? error.message : 'Unable to reach AI provider.';
+    const message = error?.name === 'TimeoutError' ? 'AI provider request timed out after 30 seconds.' : error instanceof Error ? error.message : 'Unable to reach AI provider.';
     response.status(502).json({ error: message });
   }
 }
