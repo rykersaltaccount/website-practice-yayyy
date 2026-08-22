@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
 import type { Lesson, Drill } from '../types/course';
@@ -17,6 +17,7 @@ const CourseRunnerPage: React.FC = () => {
   const [feedback, setFeedback] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [generationStage, setGenerationStage] = useState('');
+  const generatedLessonKey = useRef<string | null>(null);
 
   useEffect(() => {
     startCoding();
@@ -24,19 +25,21 @@ const CourseRunnerPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!course || !sourceLesson || sourceLesson.contentMarkdown) return;
+    const lessonKey = `${courseId || ''}:${lessonId || ''}`;
+    if (!course || !sourceLesson || sourceLesson.contentMarkdown || generatedLessonKey.current === lessonKey) return;
+    generatedLessonKey.current = lessonKey;
     setIsLoading(true);
     setGenerationStage('Preparing lesson generation...');
-    void generateCourseLesson(course, sourceLesson.title, setGenerationStage).then(generated => {
-      if (generated) {
+    void generateCourseLesson(course, sourceLesson.title, setGenerationStage)
+      .then(generated => {
+        if (!generated) throw new Error('The AI returned an incomplete lesson.');
         const hydrated = { ...sourceLesson, ...generated, id: sourceLesson.id };
         setLesson(hydrated);
         updateCourse(course.id, { modules: course.modules.map(module => ({ ...module, lessons: module.lessons.map(item => item.id === hydrated.id ? hydrated : item) })) });
-      }
-      setIsLoading(false);
-      setGenerationStage('');
-    });
-  }, [course, sourceLesson, updateCourse]);
+      })
+      .catch(error => setGenerationStage(error instanceof Error ? error.message : 'Lesson generation failed.'))
+      .finally(() => setIsLoading(false));
+  }, [courseId, lessonId]);
 
   if (!course || !lesson) return <div className="text-sm text-[#8a8f98]">Lesson not found.</div>;
   const drills = [...(lesson.drills || []), ...(lesson.capstone ? [lesson.capstone] : [])];
