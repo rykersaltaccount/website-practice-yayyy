@@ -113,7 +113,16 @@ export const generateExercises = async (
   }
 
   try {
-    const response = await fetch(url, { method: 'POST', headers, body });
+    let response: Response;
+    try {
+      response = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+      });
+    } catch {
+      throw new Error('Could not reach the CodeVault AI proxy. Start npm run dev:compiler locally or redeploy Vercel so /api/ai is available.');
+    }
     if (!response.ok) throw new Error(`AI provider returned HTTP ${response.status}`);
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const text = config.provider === 'gemini'
@@ -144,7 +153,16 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3)
     body = JSON.stringify({ model: config.model, temperature, messages: [{ role: 'system', content: 'You are a precise C++23 systems programming course author.' }, { role: 'user', content: instruction }] });
   }
   try {
-    const response = await fetch(url, { method: 'POST', headers, body });
+    let response: Response;
+    try {
+      response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+      });
+    } catch {
+      throw new Error('Could not reach the CodeVault AI proxy. Start npm run dev:compiler locally or redeploy Vercel so /api/ai is available.');
+    }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 240);
       throw new Error(`${config.provider} returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
@@ -207,7 +225,11 @@ export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: s
     body = JSON.stringify({ model: config.model, temperature: 0, messages: [{ role: 'system', content: 'You are a strict code exercise grader. Accept only correct implementations.' }, { role: 'user', content: instruction }] });
   }
   try {
-    const response = await fetch(url, { method: 'POST', headers, body });
+    const response = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+    });
     if (!response.ok) return null;
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;

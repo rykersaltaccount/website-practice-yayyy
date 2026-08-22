@@ -66,6 +66,21 @@ const proxyNvidiaRequest = async (request, response) => {
   response.end(await upstream.text());
 };
 
+const proxyAiRequest = async (request, response) => {
+  const body = JSON.parse(await readRequestBody(request));
+  if (!body.endpoint || !/^https?:\/\//i.test(body.endpoint)) {
+    sendJson(response, 400, { error: 'A valid AI endpoint is required.' });
+    return;
+  }
+  const upstream = await fetch(body.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(body.headers || {}) },
+    body: JSON.stringify(body.body || {}),
+  });
+  response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json' });
+  response.end(await upstream.text());
+};
+
 const compileAndRun = async code => {
   const folder = await mkdtemp(join(tmpdir(), 'codevault-'));
   const sourcePath = join(folder, 'main.cpp');
@@ -73,7 +88,7 @@ const compileAndRun = async code => {
 
   try {
     await writeFile(sourcePath, code, 'utf8');
-    const compile = await runProcess('g++', ['-std=c++17', '-O0', sourcePath, '-o', outputPath]);
+    const compile = await runProcess('g++', ['-std=c++23', '-O0', sourcePath, '-o', outputPath]);
     if (compile.code !== 0) {
       return { ok: false, phase: 'compile', output: compile.stderr || compile.stdout || 'Compilation failed.' };
     }
@@ -90,6 +105,13 @@ const compileAndRun = async code => {
 };
 
 const server = createServer((request, response) => {
+  if (request.method === 'POST' && request.url === '/api/ai') {
+    proxyAiRequest(request, response).catch(error => {
+      sendJson(response, 502, { error: `AI proxy failed: ${error instanceof Error ? error.message : String(error)}` });
+    });
+    return;
+  }
+
   if (request.method === 'POST' && request.url?.startsWith('/api/nvidia/')) {
     proxyNvidiaRequest(request, response).catch(error => {
       sendJson(response, 502, { error: `NVIDIA proxy failed: ${error instanceof Error ? error.message : String(error)}` });
