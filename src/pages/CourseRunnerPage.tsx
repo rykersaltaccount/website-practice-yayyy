@@ -27,6 +27,13 @@ const normalizeLesson = (lesson: Lesson): Lesson => {
   };
 };
 
+const cleanCodeSnippet = (rawCode: string) => {
+  if (!rawCode) return '';
+  return rawCode
+    .replace(/^```[a-z]*\s*\n?/i, '') // Removes leading ```cpp or ```
+    .replace(/\s*```\s*$/, '');        // Removes trailing ```
+};
+
 const getStarterCode = (drill: Drill): string => {
   const starterCode = drill.starterCode?.trim() || '';
   const looksLikeSkeleton = /TODO|IMPLEMENT|YOUR CODE/i.test(starterCode)
@@ -127,8 +134,10 @@ const CourseRunnerPage: React.FC = () => {
     editor.style.height = `${Math.min(Math.max(editor.scrollHeight, 192), 420)}px`;
   }, [code, drillIndex, lesson?.drills, lesson?.capstone]);
 
+  // 2. Sanitize the code here when setting initial starter code
   useEffect(() => {
-    setCode(activeDrill ? composeProtectedSource(activeDrill, getStarterCode(activeDrill)) : '');
+    const rawCode = activeDrill ? composeProtectedSource(activeDrill, getStarterCode(activeDrill)) : '';
+    setCode(cleanCodeSnippet(rawCode));
   }, [activeDrill?.id]);
 
   useEffect(() => {
@@ -139,7 +148,11 @@ const CourseRunnerPage: React.FC = () => {
         if (!protectedMain) return;
         const updatedDrill = { ...activeDrill, protectedMain };
         setLesson(current => current ? { ...current, drills: current.drills?.map(drill => drill.id === updatedDrill.id ? updatedDrill : drill), capstone: current.capstone?.id === updatedDrill.id ? { ...current.capstone, ...updatedDrill } : current.capstone } : current);
-        setCode(composeProtectedSource(updatedDrill, getStarterCode(updatedDrill)));
+        
+        // 3. Sanitize the code here when test harness finishes generating
+        const rawCode = composeProtectedSource(updatedDrill, getStarterCode(updatedDrill));
+        setCode(cleanCodeSnippet(rawCode));
+
         updateCourse(course?.id || '', { modules: course?.modules.map(module => ({ ...module, lessons: module.lessons.map(item => item.id === lesson?.id ? { ...item, drills: item.drills?.map(drill => drill.id === updatedDrill.id ? updatedDrill : drill), capstone: item.capstone?.id === updatedDrill.id ? { ...item.capstone, ...updatedDrill } : item.capstone } : item) })) || [] });
       })
       .finally(() => setHarnessLoading(false));
@@ -301,8 +314,29 @@ const CourseRunnerPage: React.FC = () => {
           <div ref={drillEditorRef} className="mt-4">
             <CppPredictiveEditor
               id={`${activeDrill.id}-code`}
-              value={removeMainFunction(code)}
-              onChange={value => setCode(composeProtectedSource(activeDrill, value))}
+              value={activeDrill && activeDrill.protectedMain
+                ? removeMainFunction(code.substring(0, code.length - activeDrill.protectedMain.trim().length))
+                : removeMainFunction(code)}
+              onChange={(userEditableValue) => {
+                // Protect the AI-generated test harness from user modifications
+                if (!activeDrill?.protectedMain) {
+                  setCode(userEditableValue);
+                  return;
+                }
+
+                const protectedMain = activeDrill.protectedMain.trim();
+                const trimmedValue = userEditableValue.trimEnd();
+                let userCode = trimmedValue;
+
+                // Ensure we strip out any accidental inclusion of the protected test harness
+                const protectedIndex = trimmedValue.lastIndexOf(protectedMain);
+                if (protectedIndex !== -1) {
+                  userCode = trimmedValue.substring(0, protectedIndex).trimEnd();
+                }
+
+                // Store the properly composed source containing both user code and protected harness
+                setCode(composeProtectedSource(activeDrill, userCode));
+              }}
               minHeight={210}
               maxHeight={440}
               aria-label={`${activeDrill.title} editable C++ implementation`}
