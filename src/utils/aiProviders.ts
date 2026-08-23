@@ -316,7 +316,7 @@ Return ONLY valid JSON matching this schema:
       "id": "drill-1",
       "title": "Drill title",
       "instructions": "Task instructions...",
-      "starterCode": "Complete compilable C++23 starter program with includes, the implementation scaffold, and an AI-written main() containing a small visible example of how to use the exercise.",
+      "starterCode": "Complete compilable C++23 starter program with includes, class/function declarations, TODO-only empty implementation bodies, and an AI-written main() containing a small visible example of how to call the unfinished API. Never include the solution algorithm, completed loops, hash logic, return values, or working method bodies.",
       "solution": "// Reference solution",
       "hints": ["Hint 1"],
       "gradingTokens": ["token1"],
@@ -327,7 +327,7 @@ Return ONLY valid JSON matching this schema:
     "id": "capstone-1",
     "title": "Capstone title",
     "instructions": "Task instructions...",
-    "starterCode": "Complete compilable C++23 starter program with includes, the implementation scaffold, and an AI-written main() containing a small visible example of how to use the exercise.",
+    "starterCode": "Complete compilable C++23 starter program with includes, class/function declarations, TODO-only empty implementation bodies, and an AI-written main() containing a small visible example of how to call the unfinished API. Never include the solution algorithm, completed loops, hash logic, return values, or working method bodies.",
     "solution": "// Reference solution",
     "hints": ["Hint 1"],
     "gradingTokens": ["token1"],
@@ -335,13 +335,34 @@ Return ONLY valid JSON matching this schema:
   }
 }
 
-Every drill and the capstone must have starterCode that is a complete, compilable C++23 program. Write the implementation scaffold and author a useful main() function with a small visible example call. Do not leave main() empty and do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
+Every drill and the capstone must have starterCode that is a complete, compilable C++23 program. The starterCode is a learner skeleton, not an answer: method/function bodies must contain only TODO comments and minimal compile-safe placeholders, with no completed algorithm or solution logic. Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main(). Do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
 
   // Execute a SINGLE call instead of chaining multiple calls
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
-  const result = await requestJson('course-lesson', `${prompt}\n\nUse this optional web research for factual accuracy only; do not copy it or include citations:\n${webContext || 'No web research was available.'}`, 0.2, onProgress) as Partial<Lesson> | null;
+  const researchPrompt = `${prompt}\n\nUse this optional web research for factual accuracy only; do not copy it or include citations:\n${webContext || 'No web research was available.'}`;
+  let result: Partial<Lesson> | null = null;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      if (attempt > 0) onProgress?.('The first lesson response was incomplete. Requesting a complete replacement...');
+      const instruction = attempt === 0
+        ? researchPrompt
+        : `${researchPrompt}\n\nIMPORTANT REPAIR REQUEST: The previous response was incomplete or malformed. Generate the ENTIRE lesson again from the beginning. Do not omit overview, contentMarkdown, conceptChecks, drills, or capstone. Every drill and capstone must include complete starterCode, solution, hints, gradingTokens, and hiddenTests. Return one complete JSON object only.`;
+      const candidate = await requestJson('course-lesson', instruction, 0.2, onProgress) as Partial<Lesson> | null;
+      if (candidate?.contentMarkdown && Array.isArray(candidate.conceptChecks) && Array.isArray(candidate.drills) && candidate.drills.length > 0 && candidate.capstone) {
+        result = candidate;
+        break;
+      }
+      lastError = new Error('The AI returned an incomplete lesson.');
+    } catch (error) {
+      lastError = error;
+    }
+  }
 
-  if (!result || !Array.isArray(result.drills)) return null;
+  if (!result) {
+    if (lastError instanceof Error) throw lastError;
+    return null;
+  }
 
   return {
     id: crypto.randomUUID(),

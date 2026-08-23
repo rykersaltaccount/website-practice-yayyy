@@ -22,7 +22,9 @@ const normalizeLesson = (lesson: Lesson): Lesson => {
 
 const getStarterCode = (drill: Drill): string => {
   const starterCode = drill.starterCode?.trim() || '';
-  if (starterCode && /#include|\b(class|struct|int\s+main|void\s+\w+|auto\s+\w+)\b/.test(starterCode)) {
+  const looksLikeSkeleton = /TODO|IMPLEMENT|YOUR CODE/i.test(starterCode)
+    && !/for\s*\(|while\s*\(|std::(sort|unordered_map|map|vector)|\bnew\s+|return\s+(?!0\s*;|nullptr\s*;|false\s*;)[^;]+;/.test(starterCode);
+  if (starterCode && looksLikeSkeleton && /#include|\b(class|struct|int\s+main|void\s+\w+|auto\s+\w+)\b/.test(starterCode)) {
     return /\bmain\s*\(/.test(starterCode) ? drill.starterCode : `${drill.starterCode.trim()}\n\nint main() {\n    return 0;\n}\n`;
   }
   return `#include <iostream>
