@@ -410,7 +410,7 @@ mainCode must be a complete int main() function containing exactly 10 independen
 export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<{ passed: boolean; feedback: string } | null> => {
   const config = getAiConfig(task);
   if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
-  const hiddenTests = exercise.hiddenTests || [];
+  
   const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON with two fields: "passed" (boolean) and "feedback" (string).
 
 If the solution is CORRECT:
