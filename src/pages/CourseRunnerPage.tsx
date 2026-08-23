@@ -62,25 +62,7 @@ int main() {
 `;
 };
 
-const removeMainFunction = (source: string): string => {
-  if (!source) return '';
-  const mainStart = source.search(/\b(?:int|auto)\s+main\s*\([^)]*\)\s*\{/);
-  if (mainStart < 0) return source;
-  const bodyStart = source.indexOf('{', mainStart);
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    if (source[index] === '{') depth += 1;
-    if (source[index] === '}') {
-      depth -= 1;
-      if (depth === 0) return `${source.slice(0, mainStart)}${source.slice(index + 1)}`.trim();
-    }
-  }
-  return source;
-};
-
-const composeProtectedSource = (_drill: Drill, source: string): string => {
-  return source || '';
-};
+// No longer needed - we want the full code including main function
 
 const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
   <ReactMarkdown
@@ -142,7 +124,7 @@ const CourseRunnerPage: React.FC = () => {
 
   // 2. Sanitize the code here when setting initial starter code
   useEffect(() => {
-    const rawCode = activeDrill ? composeProtectedSource(activeDrill, getStarterCode(activeDrill)) : '';
+    const rawCode = activeDrill ? getStarterCode(activeDrill) : '';
     setCode(cleanCodeSnippet(rawCode));
   }, [activeDrill?.id]);
 
@@ -189,7 +171,7 @@ const CourseRunnerPage: React.FC = () => {
   const submitDrill = async () => {
     if (!activeDrill) return;
     setFeedback('Checking with AI...');
-    const aiResult = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, composeProtectedSource(activeDrill, code), 'course-grading');
+    const aiResult = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens }, code, 'course-grading');
       let passed: boolean;
       let feedbackMessage: string;
       if (aiResult === null) {
@@ -289,7 +271,7 @@ const CourseRunnerPage: React.FC = () => {
                     <div ref={drillEditorRef} className="mt-4">
             <CppPredictiveEditor
               id={`${activeDrill.id}-code`}
-              value={removeMainFunction(code)}
+              value={code}
               onChange={(userEditableValue) => {
                 // Clean the input to remove any stray artifacts before storing
                 setCode(cleanCodeSnippet(userEditableValue));
@@ -308,9 +290,21 @@ const CourseRunnerPage: React.FC = () => {
               Run and grade drill
             </button>
           </div>
-          <p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">
-            {feedback}
-          </p>
+          <div className="mt-3 space-y-2">
+            {/* Feedback header */}
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                {feedback.includes('Finished') || feedback.includes('Great job') || feedback.includes('passes') ? (
+                  <span className="text-xs text-[#10b981]">✓</span>
+                ) : (
+                  <span className="text-xs text-[#f43f5e]">✗</span>
+                )}
+              </div>
+              <div className="ml-2 text-xs text-[#8a8f98] whitespace-pre-wrap break-words">
+                {feedback}
+              </div>
+            </div>
+          </div>
         </>
       ) : (
         <p className="text-xs text-[#8a8f98]">No drills available yet.</p>
