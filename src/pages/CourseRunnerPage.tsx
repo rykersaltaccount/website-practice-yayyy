@@ -1,47 +1,12 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import RawEditor from 'react-simple-code-editor';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
-import Prism from 'prismjs';
-import 'prismjs/components/prism-clike';
-import 'prismjs/components/prism-c';     // C++ requires 'c' first!
-import 'prismjs/components/prism-cpp';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
 import type { Lesson, Drill } from '../types/course';
 import { generateCourseLesson, generateDrillTestHarness, gradeCodingExercise } from '../utils/aiProviders';
-
-interface EditorComponentProps {
-  value: string;
-  onValueChange: (value: string) => void;
-  highlight: (value: string) => string | React.ReactNode;
-  padding?: number | { top?: number; right?: number; bottom?: number; left?: number };
-  style?: React.CSSProperties;
-  textareaId?: string;
-  textareaClassName?: string;
-  preClassName?: string;
-  'aria-label'?: string;
-  disabled?: boolean;
-}
-
-// Resolve CJS / ESM default export interop for React component
-const CodeEditor: React.ComponentType<EditorComponentProps> = (() => {
-  const comp: any = RawEditor;
-  if (typeof comp === 'function' || (typeof comp === 'object' && comp !== null && '$$typeof' in comp)) {
-    return comp;
-  }
-  if (comp && typeof comp.default === 'function') {
-    return comp.default;
-  }
-  if (comp && comp.default && typeof comp.default.default === 'function') {
-    return comp.default.default;
-  }
-  if (comp && comp.default && typeof comp.default === 'object' && '$$typeof' in comp.default) {
-    return comp.default;
-  }
-  return comp?.default || comp;
-})();
+import { CppPredictiveEditor } from '../components/CppPredictiveEditor';
 
 const normalizeLesson = (lesson: Lesson): Lesson => {
   const seen = new Set<string>();
@@ -80,12 +45,6 @@ int main() {
   return 0;
 }
 `;
-};
-
-const highlightCpp = (source: string) => {
-  // Fallback safely if Prism's C++ grammar failed to mount properly
-  const grammar = Prism.languages.cpp || Prism.languages.clike || {};
-  return Prism.highlight(source || '', grammar, 'cpp');
 };
 
 const removeMainFunction = (source: string): string => {
@@ -339,24 +298,13 @@ const CourseRunnerPage: React.FC = () => {
           {harnessLoading && (
             <p className="mt-3 text-xs text-[#8a8f98]">Preparing private tests...</p>
           )}
-          <div
-            ref={drillEditorRef}
-            className="mt-4 min-h-48 max-h-[420px] overflow-y-auto rounded-md border border-white/[0.12] bg-[#090b0f] text-xs shadow-inner focus-within:border-[#5e6ad2]"
-          >
-            <CodeEditor
+          <div ref={drillEditorRef} className="mt-4">
+            <CppPredictiveEditor
+              id={`${activeDrill.id}-code`}
               value={removeMainFunction(code)}
-              onValueChange={value => setCode(composeProtectedSource(activeDrill, value))}
-              highlight={highlightCpp}
-              padding={12}
-              textareaId={`${activeDrill.id}-code`}
-              textareaClassName="font-mono outline-none"
-              preClassName="font-mono"
-              style={{
-                minHeight: 192,
-                fontSize: 12,
-                lineHeight: 1.5,
-                fontFamily: 'var(--font-mono)',
-              }}
+              onChange={value => setCode(composeProtectedSource(activeDrill, value))}
+              minHeight={210}
+              maxHeight={440}
               aria-label={`${activeDrill.title} editable C++ implementation`}
             />
           </div>

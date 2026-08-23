@@ -1,6 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, KeyboardEvent, ReactNode } from 'react';
 import AppContext from '../contexts/AppContext';
+import { CppPredictiveEditor } from '../components/CppPredictiveEditor';
 
 type WorkspaceFile = {
   name: string;
@@ -26,10 +26,30 @@ type DirectoryPickerWindow = Window & {
 };
 
 const codeSnippets: Record<string, string> = {
-  '/includes': '#include <bits/stdc++.h>\nusing namespace std;\n',
-  '/fastio': 'ios::sync_with_stdio(false);\ncin.tie(nullptr);\n',
-  '/bfs': `queue<int> pending;
-vector<bool> visited(n, false);
+  '/includes': '#include <print>\n#include <vector>\n#include <string>\n#include <ranges>\n#include <expected>\n\n',
+  '/fastio': 'std::ios::sync_with_stdio(false);\nstd::cin.tie(nullptr);\n',
+  '/print': 'std::println("Value: {}", result);\n',
+  '/expected': `std::expected<int, std::string> safeDivide(int a, int b) {
+  if (b == 0) return std::unexpected("Division by zero");
+  return a / b;
+}
+`,
+  '/views': `auto view = numbers | std::views::filter([](int n) { return n % 2 == 0; })
+                    | std::views::transform([](int n) { return n * n; });
+auto result = view | std::ranges::to<std::vector>();
+`,
+  '/generator': `std::generator<int> countUp(int limit) {
+  for (int i = 0; i < limit; ++i) {
+    co_yield i;
+  }
+}
+`,
+  '/mdspan': `std::vector<int> buffer(rows * cols);
+std::mdspan matrix(buffer.data(), rows, cols);
+matrix[0, 0] = 42;
+`,
+  '/bfs': `std::queue<int> pending;
+std::vector<bool> visited(n, false);
 pending.push(start);
 visited[start] = true;
 while (!pending.empty()) {
@@ -50,41 +70,12 @@ while (!pending.empty()) {
   TreeNode(int value) : value(value), left(nullptr), right(nullptr) {}
 };
 `,
-  '/graph': `vector<vector<int>> graph(n);
+  '/graph': `std::vector<std::vector<int>> graph(n);
 for (const auto& edge : edges) {
   graph[edge[0]].push_back(edge[1]);
   graph[edge[1]].push_back(edge[0]);
 }
 `,
-};
-
-const javascriptTokenPattern = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|`(?:\\.|[^`])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\b(?:const|let|var|function|return|if|else|for|while|class|new|throw|try|catch|typeof|import|from|export|default|async|await)\b|\b(?:true|false|null|undefined)\b|\b\d+(?:\.\d+)?\b|\b(?:console|Math|Array|Object|Map|Set|String|Number|JSON|Promise)\b|\b[a-zA-Z_$][\w$]*(?=\s*\()|===|!==|=>|==|!=|<=|>=|&&|\|\||[+*/%=<>!-])/g;
-
-const highlightJavaScript = (code: string) => {
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
-
-  for (const match of code.matchAll(javascriptTokenPattern)) {
-    const token = match[0];
-    const index = match.index ?? 0;
-    if (index > lastIndex) nodes.push(code.slice(lastIndex, index));
-
-    let color = '#abb2bf';
-    if (token.startsWith('//') || token.startsWith('/*')) color = '#5c6370';
-    else if (token.startsWith('"') || token.startsWith("'") || token.startsWith('`')) color = '#98c379';
-    else if (/^\d/.test(token)) color = '#d19a66';
-    else if (/^(true|false|null|undefined)$/.test(token)) color = '#d19a66';
-    else if (/^(const|let|var|function|return|if|else|for|while|class|new|throw|try|catch|typeof|import|from|export|default|async|await)$/.test(token)) color = '#c678dd';
-    else if (/^(console|Math|Array|Object|Map|Set|String|Number|JSON|Promise)$/.test(token)) color = '#e5c07b';
-    else if (/^[a-zA-Z_$][\w$]*(?=\s*\()/.test(token)) color = '#61afef';
-    else color = '#56b6c2';
-
-    nodes.push(<span key={`${index}-${token}`} style={{ color }}>{token}</span>);
-    lastIndex = index + token.length;
-  }
-
-  if (lastIndex < code.length) nodes.push(code.slice(lastIndex));
-  return nodes;
 };
 
 const CodeEditorPage = () => {
@@ -159,96 +150,6 @@ const CodeEditorPage = () => {
 
   const updateActiveContent = (content: string) => {
     setFiles(current => current.map(file => file.name === activeFile ? { ...file, content } : file));
-  };
-
-  const expandSnippet = (content: string, cursorPosition: number) => {
-    const commandMatch = content.slice(0, cursorPosition).match(/\/(?:[a-z]+)$/);
-    if (!commandMatch) return null;
-    const snippet = codeSnippets[commandMatch[0]];
-    if (!snippet) return null;
-    const commandStart = cursorPosition - commandMatch[0].length;
-    return {
-      content: `${content.slice(0, commandStart)}${snippet}${content.slice(cursorPosition)}`,
-      cursorPosition: commandStart + snippet.length,
-      command: commandMatch[0],
-    };
-  };
-
-  const handleEditorChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    const textarea = event.currentTarget;
-    const cursorPosition = textarea.selectionStart;
-    const previousContent = activeContent;
-
-    const expanded = expandSnippet(textarea.value, cursorPosition);
-    if (expanded) {
-      updateActiveContent(expanded.content);
-      setStatus(`${expanded.command} snippet inserted.`);
-      requestAnimationFrame(() => textarea.setSelectionRange(expanded.cursorPosition, expanded.cursorPosition));
-      return;
-    }
-
-    if (previousContent.length === textarea.value.length + 1) {
-      const deletedOpening = previousContent[cursorPosition - 1];
-      const expectedClosing = ({ '(': ')', '[': ']', '{': '}' } as Record<string, string>)[deletedOpening];
-
-      if (expectedClosing && previousContent[cursorPosition] === expectedClosing && textarea.value[cursorPosition] === expectedClosing) {
-        const nextValue = `${textarea.value.slice(0, cursorPosition - 1)}${textarea.value.slice(cursorPosition + 1)}`;
-        updateActiveContent(nextValue);
-        requestAnimationFrame(() => textarea.setSelectionRange(cursorPosition - 1, cursorPosition - 1));
-        return;
-      }
-    }
-
-    const insertedCharacter = textarea.value[cursorPosition - 1];
-    const closingCharacters: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
-    const closingCharacter = closingCharacters[insertedCharacter];
-
-    if (closingCharacter && textarea.value[cursorPosition] !== closingCharacter) {
-      const nextValue = `${textarea.value.slice(0, cursorPosition)}${closingCharacter}${textarea.value.slice(cursorPosition)}`;
-      updateActiveContent(nextValue);
-      requestAnimationFrame(() => textarea.setSelectionRange(cursorPosition, cursorPosition));
-      return;
-    }
-
-    updateActiveContent(textarea.value);
-  };
-
-  const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    const textarea = event.currentTarget;
-    const cursorPosition = textarea.selectionStart;
-    const selectionEnd = textarea.selectionEnd;
-    const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
-
-    if (pairs[event.key] && cursorPosition === selectionEnd) {
-      event.preventDefault();
-      const nextValue = `${textarea.value.slice(0, cursorPosition)}${event.key}${pairs[event.key]}${textarea.value.slice(cursorPosition)}`;
-      updateActiveContent(nextValue);
-      requestAnimationFrame(() => textarea.setSelectionRange(cursorPosition + 1, cursorPosition + 1));
-      return;
-    }
-
-    if (event.key === 'Backspace' && cursorPosition === selectionEnd) {
-      const opening = textarea.value[cursorPosition - 2];
-      const closing = textarea.value[cursorPosition - 1];
-      if (pairs[opening] === closing) {
-        event.preventDefault();
-        const nextValue = `${textarea.value.slice(0, cursorPosition - 2)}${textarea.value.slice(cursorPosition)}`;
-        updateActiveContent(nextValue);
-        requestAnimationFrame(() => textarea.setSelectionRange(cursorPosition - 2, cursorPosition - 2));
-        return;
-      }
-    }
-
-    if (event.key !== 'Delete' || cursorPosition !== selectionEnd) return;
-
-    const opening = textarea.value[cursorPosition - 1];
-    const closing = textarea.value[cursorPosition];
-    if (pairs[opening] !== closing) return;
-
-    event.preventDefault();
-    const nextValue = `${textarea.value.slice(0, cursorPosition - 1)}${textarea.value.slice(cursorPosition + 1)}`;
-    updateActiveContent(nextValue);
-    requestAnimationFrame(() => textarea.setSelectionRange(cursorPosition - 1, cursorPosition - 1));
   };
 
   const readWorkspace = async (handle: DirectoryHandle) => {
@@ -533,24 +434,13 @@ const CodeEditorPage = () => {
         </div>
 
         {/* Editor Body */}
-        <div className="code-editor-scrollbar-hidden relative min-h-[28rem] flex-1 overflow-hidden bg-[#090a0f]">
-          <pre
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 m-0 whitespace-pre-wrap break-words p-5 font-mono text-xs leading-6"
-          >
-            {highlightJavaScript(activeContent)}
-            {activeContent.endsWith('\n') ? '\n' : ''}
-          </pre>
-          <textarea
+        <div className="relative min-h-[28rem] flex-1 overflow-hidden bg-[#090a0f]">
+          <CppPredictiveEditor
+            id={`workspace-${activeFile}`}
             value={activeContent}
-            onChange={handleEditorChange}
-            onKeyDown={handleEditorKeyDown}
-            spellCheck={false}
-            onScroll={event => {
-              const preview = event.currentTarget.previousElementSibling;
-              if (preview) preview.setAttribute('style', `transform: translateY(-${event.currentTarget.scrollTop}px)`);
-            }}
-            className="code-editor-scrollbar-hidden relative z-10 block min-h-[28rem] h-full w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent p-5 font-mono text-xs leading-6 text-transparent caret-white outline-none selection:bg-[#5e6ad2]/30"
+            onChange={updateActiveContent}
+            minHeight={450}
+            maxHeight={650}
             aria-label={`Edit ${activeFile}`}
           />
         </div>
