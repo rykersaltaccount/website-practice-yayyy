@@ -296,46 +296,57 @@ export const generateCourseLesson = async (
   lessonTitle: string,
   onProgress?: GenerationProgress
 ): Promise<Lesson | null> => {
-  const prompt = `Generate a lesson on "${lessonTitle}" for the course "${course.title}" (${course.level} level).
+  const prompt = `Generate an exceptional, highly engaging lesson on "${lessonTitle}" for the course "${course.title}" (${course.level} level).
+
+PEDAGOGICAL & WRITING STYLE (freeCodeCamp interactive tutorial style):
+- Write in a warm, conversational, encouraging mentor voice that talks directly to the learner ("you").
+- Break down complex C++23 mechanics into bite-sized, digestible steps. Never dump a wall of dense academic text.
+- For every code concept introduced, immediately show a clean code example, then walk through it line-by-line using phrases like "Notice how...", "Behind the scenes...", or "When this runs...".
+- Use clear markdown formatting, bullet points, bold text for key terms, and markdown blockquotes or code blocks to make the reading experience immersive and scannable.
+- Include ASCII memory diagrams or visual flow explanations where helpful for understanding pointers, references, memory layouts, or object lifetimes.
 
 Return ONLY valid JSON matching this schema:
 {
-  "overview": "1-2 sentence overview",
-  "contentMarkdown": "Technical guide (600-800 words) explaining modern C++23 concepts, memory behavior, and lifetime rules with code examples and ASCII memory diagrams.",
+  "overview": "1-2 sentence engaging overview",
+  "contentMarkdown": "Comprehensive, interactive tutorial (600-900 words) written in the freeCodeCamp pedagogical style described above, covering modern C++23 features, memory model, and best practices.",
   "conceptChecks": [
     {
       "id": "cc-1",
-      "question": "Conceptual question...",
+      "question": "Clear conceptual question testing a core misconception or rule...",
       "options": ["A", "B", "C", "D"],
       "correctIndex": 0,
-      "explanation": "Why this option is correct."
+      "explanation": "Clear explanation of why this option is correct and why others fail."
     }
   ],
   "drills": [
     {
       "id": "drill-1",
       "title": "Drill title",
-      "instructions": "Task instructions...",
-      "starterCode": "Complete compilable C++23 starter program with includes, class/function declarations, TODO-only empty implementation bodies, and an AI-written main() containing a small visible example of how to call the unfinished API. Never include the solution algorithm, completed loops, hash logic, return values, or working method bodies.",
-      "solution": "// Reference solution",
-      "hints": ["Hint 1"],
-      "gradingTokens": ["token1"],
-      "hiddenTests": ["Input: ... Expected behavior: ...", "Input: ... Expected behavior: ..."]
+      "instructions": "Clear, practical task instructions...",
+      "starterCode": "Complete, compilable C++23 starter program with necessary includes, class/struct definitions, TODO comments inside function/method bodies, and a clean main() function that demonstrates how to invoke the API with sample inputs without solving the core logic.",
+      "solution": "// Complete reference solution implementation",
+      "hints": ["Targeted hint 1"],
+      "gradingTokens": ["distinctiveToken1", "distinctiveToken2"],
+      "hiddenTests": ["Edge case test requirement 1", "Performance/correctness test requirement 2"]
     }
   ],
   "capstone": {
     "id": "capstone-1",
     "title": "Capstone title",
-    "instructions": "Task instructions...",
-    "starterCode": "Complete compilable C++23 starter program with includes, class/function declarations, TODO-only empty implementation bodies, and an AI-written main() containing a small visible example of how to call the unfinished API. Never include the solution algorithm, completed loops, hash logic, return values, or working method bodies.",
-    "solution": "// Reference solution",
+    "instructions": "Comprehensive task instructions bringing module concepts together...",
+    "starterCode": "Complete, compilable C++23 starter program with necessary includes, class/struct definitions, TODO comments inside function/method bodies, and a clean main() function demonstrating usage.",
+    "solution": "// Complete reference solution implementation",
     "hints": ["Hint 1"],
     "gradingTokens": ["token1"],
-    "hiddenTests": ["Input: ... Expected behavior: ...", "Input: ... Expected behavior: ..."]
+    "hiddenTests": ["Comprehensive test case 1", "Comprehensive test case 2"]
   }
 }
 
-Every drill and the capstone must have starterCode that is a complete, compilable C++23 program. The starterCode is a learner skeleton, not an answer: method/function bodies must contain only TODO comments and minimal compile-safe placeholders, with no completed algorithm or solution logic. Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main(). Do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
+CRITICAL RULES FOR DRILLS & CAPSTONE:
+- Every drill and the capstone must have starterCode that is a complete, compilable C++23 program. 
+- The starterCode is a learner skeleton, not an answer: method/function bodies must contain only TODO comments and minimal compile-safe placeholders, with no completed algorithm or solution logic. 
+- Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main(). 
+- Do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
 
   // Execute a SINGLE call instead of chaining multiple calls
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
@@ -371,22 +382,22 @@ Every drill and the capstone must have starterCode that is a complete, compilabl
     bestScore: 0,
     overview: result.overview || '',
     contentMarkdown: result.contentMarkdown || 'Content unavailable.',
-      conceptChecks: uniqueConceptChecks(result.conceptChecks || []),
+    conceptChecks: uniqueConceptChecks(result.conceptChecks || []),
     drills: result.drills || [],
     capstone: result.capstone,
   };
 };
 
 export const generateDrillTestHarness = async (drill: Pick<Drill, 'title' | 'instructions' | 'starterCode' | 'solution' | 'hiddenTests'>): Promise<string | null> => {
-  const prompt = `Create a protected C++23 test harness for this coding drill.
+  const prompt = `Create a robust, production-grade C++23 test harness for this coding drill.
 Title: ${drill.title}
 Requirements: ${drill.instructions}
 Starter context: ${drill.starterCode}
-Reference solution (use only to design tests): ${drill.solution}
+Reference solution (use only to design rigorous tests): ${drill.solution}
 Private test ideas: ${(drill.hiddenTests || []).join(' | ')}
 
 Return ONLY valid JSON in this exact shape: {"mainCode":"..."}.
-mainCode must be a complete int main() function containing exactly 10 independent tests derived from the requirements. Label each test with a comment exactly like // TEST 1 through // TEST 10. Use assertions or clear pass/fail checks and return a nonzero exit code when any test fails. Do not include the reference solution in mainCode. Do not include hidden test explanations or expected answers outside the code. The learner must implement the API that mainCode calls.`;
+mainCode must be a complete int main() function containing exactly 10 independent, thorough test cases covering edge cases, standard use cases, performance constraints, and error handling. Label each test clearly with a comment exactly like // TEST 1 through // TEST 10. Use assert statements or explicit validation checks with descriptive failure messages, and return a non-zero exit code if any test fails. The harness must call the learner's implemented functions/classes cleanly.`;
   try {
     const result = await requestJson('course-grading', prompt, 0) as { mainCode?: string } | null;
     const testLabels = result?.mainCode?.match(/\/\/\s*TEST\s+(?:[1-9]|10)\b/gi) || [];
