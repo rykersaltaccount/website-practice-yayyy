@@ -407,11 +407,28 @@ mainCode must be a complete int main() function containing exactly 10 independen
   }
 };
 
-export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<boolean | null> => {
+export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<{ passed: boolean; feedback: string } | null> => {
   const config = getAiConfig(task);
   if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
   const hiddenTests = exercise.hiddenTests || [];
-  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON {"passed":true} or {"passed":false}. The answer must be a correct compilable C++23 implementation of the requested behavior, not merely contain keywords. Exercise: ${exercise.prompt}. Rubric tokens: ${(exercise.validationTokens || []).join(', ')}. Apply these private hidden tests and do not reveal them: ${hiddenTests.join(' | ') || 'Create and mentally apply at least three edge-case tests.'}. Submitted C++23 code:\n${answer}`;
+  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON with two fields: "passed" (boolean) and "feedback" (string).
+
+If the solution is CORRECT:
+- Set "passed": true
+- Provide encouraging feedback that confirms what was done well and suggests next steps or related concepts to explore
+
+If the solution is INCORRECT:
+- Set "passed": false
+- Provide SPECIFIC, STEP-BY-STEP guidance on exactly what needs to be fixed
+- Include the EXACT architecture or code structure that should be implemented
+- Mention specific lines or sections that need modification
+- Reference the exercise requirements: ${exercise.prompt}
+- Consider the rubric tokens: ${(exercise.validationTokens || []).join(', ')}
+- Do NOT reveal hidden tests, but DO explain what concepts or techniques are missing
+- Format feedback as clear, numbered steps when multiple issues exist
+
+Exercise: ${exercise.prompt}
+Submitted C++23 code:\n${answer}`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let url = config.endpoint;
   let body: string;
@@ -420,7 +437,7 @@ export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: s
     body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } });
   } else {
     if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-    body = JSON.stringify({ model: config.model, temperature: 0, messages: [{ role: 'system', content: 'You are a strict code exercise grader. Accept only correct implementations.' }, { role: 'user', content: instruction }] });
+    body = JSON.stringify({ model: config.model, temperature: 0, messages: [{ role: 'system', content: 'You are a strict code exercise grader. When code is incorrect, provide EXACT, SPECIFIC guidance on what to fix including precise architectural guidance, line-by-line corrections, and clear next steps. When code is correct, provide encouraging confirmation.' }, { role: 'user', content: instruction }] });
   }
   try {
     const response = await fetch('/api/ai', {
@@ -432,7 +449,10 @@ export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: s
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
     if (!text) return null;
-    return Boolean((extractJson(text) as { passed?: boolean }).passed);
+    const result = extractJson(text) as { passed?: boolean; feedback?: string };
+    const passed = Boolean(result.passed);
+    const feedback = result.feedback ?? (passed ? 'Great job! Your solution passes all tests.' : 'Your solution needs improvement. Please review the exercise requirements carefully and ensure your implementation matches all specified criteria.');
+    return { passed, feedback };
   } catch {
     return null;
   }

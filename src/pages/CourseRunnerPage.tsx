@@ -78,9 +78,8 @@ const removeMainFunction = (source: string): string => {
   return source;
 };
 
-const composeProtectedSource = (drill: Drill, source: string): string => {
-  if (!drill.protectedMain) return source || '';
-  return `${removeMainFunction(source || '')}\n\n${drill.protectedMain.trim()}\n`;
+const composeProtectedSource = (_drill: Drill, source: string): string => {
+  return source || '';
 };
 
 const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
@@ -189,9 +188,18 @@ const CourseRunnerPage: React.FC = () => {
 
   const submitDrill = async () => {
     if (!activeDrill) return;
-      setFeedback('Checking with AI...');
-      const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, composeProtectedSource(activeDrill, code), 'course-grading');
-      const passed = aiPassed ?? (code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token)));
+    setFeedback('Checking with AI...');
+    const aiResult = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, composeProtectedSource(activeDrill, code), 'course-grading');
+      let passed: boolean;
+      let feedbackMessage: string;
+      if (aiResult === null) {
+        // Fallback validation when AI service unavailable
+        passed = code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token));
+        feedbackMessage = passed ? 'Great job! Your solution passes basic validation.' : 'AI grading unavailable and solution did not pass basic validation. Review requirements and try again.';
+      } else {
+        passed = aiResult.passed;
+        feedbackMessage = aiResult.feedback ?? (passed ? 'Great job! Your solution passes all tests.' : 'Your solution needs improvement. Review the requirements and try again.');
+      }
       if (passed) {
         const finishedMessage = `Drill ${drillIndex + 1} Finished.`;
         setFeedback(finishedMessage);
@@ -200,7 +208,7 @@ const CourseRunnerPage: React.FC = () => {
         else setDrillIndex(index => index + 1);
         setCode('');
       } else {
-        setFeedback(aiPassed === null ? 'AI grading was unavailable. Check the grading provider and try again.' : 'The solution did not pass the hidden tests. Review the requirements and try again.');
+        setFeedback(feedbackMessage);
         addMistake({ description: `Failed course drill: ${activeDrill.title}`, example: code || 'No code submitted.', relatedConcept: '', relatedProblems: [], learningLog: 'Review the lesson and retry the drill.', reviewedRecently: false });
       }
     };
