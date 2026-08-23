@@ -10,7 +10,7 @@ export default async function handler(request, response) {
 
   try {
     const rawBody = typeof request.body === 'string' ? JSON.parse(request.body) : request.body
-    const { endpoint, headers = {}, body } = rawBody || {}
+    const { endpoint, method = 'POST', headers = {}, body } = rawBody || {}
     if (!endpoint || typeof endpoint !== 'string' || !/^https?:\/\//i.test(endpoint)) {
       response.statusCode = 400
       response.setHeader('Content-Type', 'application/json')
@@ -18,11 +18,11 @@ export default async function handler(request, response) {
       return
     }
 
-    const signal = AbortSignal.timeout(30000)
+    const signal = AbortSignal.timeout(90000)
     const upstream = await fetch(endpoint, {
-      method: 'POST',
+      method: method === 'GET' ? 'GET' : 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify(body || {}),
+      ...(method === 'GET' ? {} : { body: JSON.stringify(body || {}) }),
       signal,
     })
     const text = await upstream.text()
@@ -30,7 +30,7 @@ export default async function handler(request, response) {
     response.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json')
     response.end(text)
   } catch (error) {
-    const message = error?.name === 'TimeoutError' ? 'AI provider request timed out after 30 seconds.' : error instanceof Error ? error.message : 'Unable to reach AI provider.'
+    let message = error?.name === 'TimeoutError' ? 'AI provider request timed out after 90 seconds.' : error instanceof Error ? error.message : 'Unable to reach AI provider.'
     response.statusCode = 502
     response.setHeader('Content-Type', 'application/json')
     response.end(JSON.stringify({ error: message }))

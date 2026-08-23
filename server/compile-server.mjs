@@ -68,15 +68,16 @@ const proxyNvidiaRequest = async (request, response) => {
 
 const proxyAiRequest = async (request, response) => {
   const body = JSON.parse(await readRequestBody(request));
+  const method = body.method === 'GET' ? 'GET' : 'POST';
   if (!body.endpoint || !/^https?:\/\//i.test(body.endpoint)) {
     sendJson(response, 400, { error: 'A valid AI endpoint is required.' });
     return;
   }
   const upstream = await fetch(body.endpoint, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', ...(body.headers || {}) },
-    body: JSON.stringify(body.body || {}),
-    signal: AbortSignal.timeout(30000),
+    ...(method === 'POST' ? { body: JSON.stringify(body.body || {}) } : {}),
+    signal: AbortSignal.timeout(90000),
   });
   response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json' });
   response.end(await upstream.text());

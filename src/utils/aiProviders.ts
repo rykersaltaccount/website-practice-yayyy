@@ -1,5 +1,6 @@
 import type { Concept } from '../types';
 import type { Course, Lesson } from '../types/course';
+import { jsonrepair } from 'jsonrepair';
 
 export type AiTask = 'practice' | 'test' | 'helper' | 'course' | 'course-syllabus' | 'course-lesson' | 'course-reading' | 'course-grading';
 export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
@@ -19,6 +20,7 @@ export interface GeneratedExercise {
   acceptedAnswers: string[];
   starterCode?: string;
   validationTokens?: string[];
+  hiddenTests?: string[];
 }
 
 const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
@@ -31,11 +33,13 @@ const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
 };
 
 const courseModels: Record<Extract<AiTask, `course-${string}`>, AiConfig> = {
-  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
-  'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'deepseek-ai/deepseek-r1' },
+  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
+  'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
   'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'nvidia/nemotron-3-nano-30b-a3b' },
-  'course-grading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
+  'course-grading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
 };
+
+const oldCourseModels = new Set(['meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1']);
 
 const storageKey = 'codevault-ai-configs';
 
@@ -51,7 +55,12 @@ const readConfigs = (): Partial<Record<AiTask, AiConfig>> => {
 export const getAiConfig = (task: AiTask): AiConfig => {
   const saved = readConfigs();
   const config = saved[task];
-  if (config) return { ...config, apiKey: config.apiKey || '' };
+  if (config) {
+    if (task in courseModels && config.provider === 'nim' && oldCourseModels.has(config.model)) {
+      return { ...courseModels[task as keyof typeof courseModels], apiKey: config.apiKey || '' };
+    }
+    return { ...config, apiKey: config.apiKey || '' };
+  }
 
   if (task in courseModels) return { ...courseModels[task as keyof typeof courseModels] };
 
@@ -81,9 +90,85 @@ export const saveAiConfig = (task: AiTask, config: AiConfig) => {
 
 export const providerDefaults = defaults;
 
+export interface AiConnectionTestResult {
+  ok: boolean;
+  message: string;
+  latencyMs: number;
+}
+
+export const testAiConfig = async (config: AiConfig): Promise<AiConnectionTestResult> => {
+  const startedAt = performance.now();
+  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) {
+    return { ok: false, message: 'Endpoint, model, and API key are required.', latencyMs: 0 };
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let url = config.endpoint.trim();
+  let body: Record<string, unknown>;
+  if (config.provider === 'gemini') {
+    url = `${url}/${config.model.trim()}:generateContent?key=${encodeURIComponent(config.apiKey.trim())}`;
+    body = { contents: [{ parts: [{ text: 'Reply with exactly OK.' }] }], generationConfig: { maxOutputTokens: 1 } };
+  } else {
+    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
+    body = { model: config.provider === 'nim' ? 'meta/llama-3.1-8b-instruct' : config.model.trim(), temperature: 0, max_tokens: 1, messages: [{ role: 'user', content: 'Reply with exactly OK.' }] };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 30000);
+    const response = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: url, headers, body }),
+      signal: controller.signal,
+    });
+    window.clearTimeout(timeout);
+    const latencyMs = Math.round(performance.now() - startedAt);
+    if (!response.ok) {
+      const responseText = await response.text();
+      let detail = responseText;
+      try {
+        const parsed = JSON.parse(responseText) as { error?: string };
+        detail = parsed.error || responseText;
+      } catch {
+        // Keep plain-text provider and proxy errors readable.
+      }
+      return { ok: false, message: `HTTP ${response.status}${detail ? `: ${detail}` : ''}`, latencyMs };
+    }
+    return { ok: true, message: `Connection verified in ${latencyMs} ms.`, latencyMs };
+  } catch (error) {
+    const latencyMs = Math.round(performance.now() - startedAt);
+    return { ok: false, message: error instanceof DOMException && error.name === 'AbortError' ? 'Timed out after 30 seconds.' : 'Proxy or network request failed.', latencyMs };
+  }
+};
+
 const extractJson = (text: string): unknown => {
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  return JSON.parse(cleaned);
+  const candidates = [cleaned];
+  const firstObject = cleaned.indexOf('{');
+  const lastObject = cleaned.lastIndexOf('}');
+  if (firstObject >= 0 && lastObject > firstObject) candidates.push(cleaned.slice(firstObject, lastObject + 1));
+
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(jsonrepair(candidate));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('AI returned invalid JSON.');
+};
+
+const uniqueConceptChecks = (checks: Lesson['conceptChecks']): Lesson['conceptChecks'] => {
+  if (!checks) return checks;
+  const seen = new Set<string>();
+  return checks.filter(check => {
+    const key = check.question.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 };
 
 export const generateExercises = async (
@@ -116,10 +201,10 @@ export const generateExercises = async (
     let response: Response;
     try {
       response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
-      });
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+        });
     } catch {
       throw new Error('Could not reach the CodeVault AI proxy. Start npm run dev:compiler locally or redeploy Vercel so /api/ai is available.');
     }
@@ -150,10 +235,10 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
   let body: string;
   if (config.provider === 'gemini') {
     url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
-    body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature, responseMimeType: 'application/json' } });
+    body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature, maxOutputTokens: 4096, responseMimeType: 'application/json' } });
   } else {
     if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-    body = JSON.stringify({ model: config.model, temperature, messages: [{ role: 'system', content: 'You are a precise C++23 systems programming course author.' }, { role: 'user', content: instruction }] });
+    body = JSON.stringify({ model: config.model, ...(config.provider === 'ollama' ? { format: 'json' } : {}), ...(config.provider === 'nim' ? { response_format: { type: 'json_object' } } : {}), temperature, max_tokens: 4096, messages: [{ role: 'system', content: 'You are a precise C++23 systems programming course author. Return one valid JSON object only, with no markdown fences or commentary.' }, { role: 'user', content: instruction }] });
   }
   try {
     onProgress?.(`Sending request to ${config.model}...`);
@@ -169,7 +254,7 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
       });
       window.clearTimeout(timeout);
     } catch {
-      throw new Error('The AI request timed out after 30 seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.');
+      throw new Error('The AI request timed out after 120 seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.');
     }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 240);
@@ -192,8 +277,8 @@ export const generateCourseSyllabus = async (topic: string, level: Course['level
 };
 
 export const generateCourseLesson = async (
-  course: Course, 
-  lessonTitle: string, 
+  course: Course,
+  lessonTitle: string,
   onProgress?: GenerationProgress
 ): Promise<Lesson | null> => {
   const prompt = `Generate a lesson on "${lessonTitle}" for the course "${course.title}" (${course.level} level).
@@ -216,22 +301,26 @@ Return ONLY valid JSON matching this schema:
       "id": "drill-1",
       "title": "Drill title",
       "instructions": "Task instructions...",
-      "starterCode": "// Starter code",
+      "starterCode": "Complete compilable C++23 starter program with includes, the implementation scaffold, and an AI-written main() containing a small visible example of how to use the exercise.",
       "solution": "// Reference solution",
       "hints": ["Hint 1"],
-      "gradingTokens": ["token1"]
+      "gradingTokens": ["token1"],
+      "hiddenTests": ["Input: ... Expected behavior: ...", "Input: ... Expected behavior: ..."]
     }
   ],
   "capstone": {
     "id": "capstone-1",
     "title": "Capstone title",
     "instructions": "Task instructions...",
-    "starterCode": "// Starter code",
+    "starterCode": "Complete compilable C++23 starter program with includes, the implementation scaffold, and an AI-written main() containing a small visible example of how to use the exercise.",
     "solution": "// Reference solution",
     "hints": ["Hint 1"],
-    "gradingTokens": ["token1"]
+    "gradingTokens": ["token1"],
+    "hiddenTests": ["Input: ... Expected behavior: ...", "Input: ... Expected behavior: ..."]
   }
-}`;
+}
+
+Every drill and the capstone must have starterCode that is a complete, compilable C++23 program. Write the implementation scaffold and author a useful main() function with a small visible example call. Do not leave main() empty and do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
 
   // Execute a SINGLE call instead of chaining multiple calls
   const result = await requestJson('course-lesson', prompt, 0.2, onProgress) as Partial<Lesson> | null;
@@ -245,7 +334,7 @@ Return ONLY valid JSON matching this schema:
     bestScore: 0,
     overview: result.overview || '',
     contentMarkdown: result.contentMarkdown || 'Content unavailable.',
-    conceptChecks: result.conceptChecks || [],
+      conceptChecks: uniqueConceptChecks(result.conceptChecks || []),
     drills: result.drills || [],
     capstone: result.capstone,
   };
@@ -254,7 +343,8 @@ Return ONLY valid JSON matching this schema:
 export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<boolean | null> => {
   const config = getAiConfig(task);
   if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
-  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON {"passed":true} or {"passed":false}. The answer must be a correct compilable C++23 implementation of the requested behavior, not merely contain keywords. Exercise: ${exercise.prompt}. Rubric tokens: ${(exercise.validationTokens || []).join(', ')}. Submitted C++23 code:\n${answer}`;
+  const hiddenTests = exercise.hiddenTests || [];
+  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON {"passed":true} or {"passed":false}. The answer must be a correct compilable C++23 implementation of the requested behavior, not merely contain keywords. Exercise: ${exercise.prompt}. Rubric tokens: ${(exercise.validationTokens || []).join(', ')}. Apply these private hidden tests and do not reveal them: ${hiddenTests.join(' | ') || 'Create and mentally apply at least three edge-case tests.'}. Submitted C++23 code:\n${answer}`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let url = config.endpoint;
   let body: string;

@@ -43,6 +43,7 @@ export interface Drill {
   solution: string;
   hints: string[];
   gradingTokens: string[];
+  hiddenTests?: string[];
 }
 
 export interface Capstone extends Drill {

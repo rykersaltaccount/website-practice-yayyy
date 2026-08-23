@@ -1,4 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
+import remarkGfm from 'remark-gfm';
 import AppContext from '../contexts/AppContext';
 import { getAiConfig, saveAiConfig, type AiProvider } from '../utils/aiProviders';
 
@@ -10,21 +13,28 @@ interface Message {
   text: string;
 }
 
-const formatMessage = (text: string) => text.split('\n').map((line, lineIndex) => {
-  const parts = line.split(/(\*\*[^*]+\*\*)/g);
-  const content = parts.map((part, partIndex) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={`${lineIndex}-${partIndex}`} className="text-white font-semibold">{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
-
-  return (
-    <span key={lineIndex} className={/^(\d+\.\s+|[-*]\s+)/.test(line) ? 'block pl-2 text-sm leading-relaxed text-[#f7f8f8]' : 'block text-sm leading-relaxed text-[#f7f8f8]'}>
-      {content}
-    </span>
-  );
-});
+const formatMessage = (text: string) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    rehypePlugins={[rehypeHighlight]}
+    components={{
+      h1: ({ children }) => <h3 className="mt-4 text-sm font-bold text-white first:mt-0">{children}</h3>,
+      h2: ({ children }) => <h4 className="mt-4 text-sm font-semibold text-white first:mt-0">{children}</h4>,
+      h3: ({ children }) => <h5 className="mt-3 text-xs font-semibold text-[#d8b4fe] first:mt-0">{children}</h5>,
+      p: ({ children }) => <p className="mt-2 max-w-full break-words text-sm leading-relaxed text-[#f7f8f8] first:mt-0">{children}</p>,
+      ul: ({ children }) => <ul className="mt-2 max-w-full list-disc space-y-1 break-words pl-5 text-sm leading-relaxed text-[#f7f8f8]">{children}</ul>,
+      ol: ({ children }) => <ol className="mt-2 max-w-full list-decimal space-y-1 break-words pl-5 text-sm leading-relaxed text-[#f7f8f8]">{children}</ol>,
+      blockquote: ({ children }) => <blockquote className="mt-3 border-l-2 border-[#10b981]/60 pl-3 text-sm italic text-[#a7f3d0]">{children}</blockquote>,
+      code: ({ className, children, ...props }) => className
+        ? <code className={className} {...props}>{children}</code>
+        : <code className="rounded bg-[#242832] px-1 py-0.5 font-mono text-[0.85em] text-[#a7f3d0]" {...props}>{children}</code>,
+      pre: ({ children }) => <pre className="mt-3 max-w-full overflow-x-auto rounded-lg border border-white/[0.1] bg-[#090b0f] p-3 text-xs leading-5 shadow-inner">{children}</pre>,
+      a: ({ children, href }) => <a href={href} className="text-[#6ee7b7] underline decoration-[#10b981]/40 underline-offset-2 hover:text-white">{children}</a>,
+    }}
+  >
+    {text}
+  </ReactMarkdown>
+);
 
 const API_PRESETS = {
   chatgpt: { label: 'ChatGPT / OpenAI', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
@@ -48,7 +58,35 @@ const AiHelper = () => {
   const [apiKey, setApiKey] = useState(() => getAiConfig('helper').apiKey);
   const [messages, setMessages] = useState<Message[]>([]);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentRef = useRef<HTMLInputElement>(null);
   const isOllama = apiProvider === 'ollama';
+
+  const insertIntoPrompt = (value: string, wrapSelection = false) => {
+    const textarea = promptRef.current;
+    if (!textarea) {
+      setPrompt(current => `${current}${value}`);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = prompt.slice(start, end);
+    const inserted = wrapSelection && selected ? `**${selected}**` : value;
+    setPrompt(`${prompt.slice(0, start)}${inserted}${prompt.slice(end)}`);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const cursor = start + inserted.length;
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const attachTextFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const content = await file.text();
+    const clippedContent = content.length > 12000 ? `${content.slice(0, 12000)}\n[Attachment clipped at 12,000 characters]` : content;
+    setPrompt(current => `${current}${current ? '\n\n' : ''}[Attached: ${file.name}]\n${clippedContent}`);
+  };
 
   useEffect(() => {
     const reload = () => {
@@ -103,19 +141,25 @@ const AiHelper = () => {
     const isGemini = apiProvider === 'gemini';
     const requestUrl = isGemini ? `${requestEndpoint}/${apiModel.trim()}:generateContent?key=${encodeURIComponent(apiKey.trim())}` : requestEndpoint;
     try {
-      response = await fetch(requestUrl, {
+      response = await fetch('/api/ai', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(!isGemini && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
         },
-        body: isGemini ? JSON.stringify({ contents: [{ parts: [{ text: request }] }] }) : JSON.stringify({
-          model: apiModel.trim(),
-          temperature: 0.3,
-          messages: [
-            { role: 'system', content: 'You are Linear Agent, an autonomous programming and sprint assistant for engineers. Give concise, razor-sharp technical advice and action items based on the workspace.' },
-            { role: 'user', content: `Workspace:\n${JSON.stringify(workspace)}\n\nPrompt: ${request}` },
-          ],
+        body: JSON.stringify({
+          endpoint: requestUrl,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(!isGemini && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
+          },
+          body: isGemini ? { contents: [{ parts: [{ text: request }] }] } : {
+            model: apiModel.trim(),
+            temperature: 0.3,
+            messages: [
+              { role: 'system', content: 'You are Linear Agent, an autonomous programming and sprint assistant for engineers. Give concise, razor-sharp technical advice and action items based on the workspace.' },
+              { role: 'user', content: `Workspace:\n${JSON.stringify(workspace)}\n\nPrompt: ${request}` },
+            ],
+          },
         }),
       });
     } catch (error) {
@@ -312,12 +356,12 @@ const AiHelper = () => {
                   </div>
 
                   {/* Content */}
-                  <div className="flex-1 space-y-1">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-white">{msg.author || 'User'}</span>
                       <span className="text-[10px] text-[#62666f]">{msg.timestamp || '10:52 PM'}</span>
                     </div>
-                    <div className="text-[#dedede] leading-relaxed">
+                    <div className="min-w-0 max-w-full overflow-hidden text-[#dedede] leading-relaxed">
                       {formatMessage(msg.text)}
                     </div>
                   </div>
@@ -332,19 +376,7 @@ const AiHelper = () => {
             </div>
           )}
 
-          {/* Command Pill Prompt (Image 1) */}
           <div className="border-t border-white/[0.08] bg-[#0b0c10] p-3 space-y-2">
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setPrompt('@Linear create urgent issues and assign to me')}
-                className="flex items-center gap-1 rounded-md bg-[#5e6ad2]/15 border border-[#5e6ad2]/30 px-2 py-0.5 text-[11px] text-[#818cf8] hover:bg-[#5e6ad2]/25 transition-colors"
-              >
-                <span className="font-semibold">@Linear</span>
-                <span>create urgent issues and assign to me</span>
-              </button>
-            </div>
-
             {/* Input & Action Toolbar (Image 1) */}
             <form onSubmit={handlePrompt} className="space-y-2">
               <textarea
@@ -366,13 +398,14 @@ const AiHelper = () => {
               <div className="flex items-center justify-between pt-1 border-t border-white/[0.04]">
                 {/* Left Tool Icons */}
                 <div className="flex items-center gap-1.5 text-[#8a8f98]">
-                  <button type="button" className="p-1 hover:text-white rounded" title="Attach file">+</button>
-                  <button type="button" className="p-1 hover:text-white rounded text-[11px] font-serif" title="Format">Aa</button>
-                  <button type="button" className="p-1 hover:text-white rounded" title="Emoji">😀</button>
-                  <button type="button" className="p-1 hover:text-white rounded" title="Mention">@</button>
-                  <button type="button" className="p-1 hover:text-white rounded" title="Video">📹</button>
-                  <button type="button" className="p-1 hover:text-white rounded" title="Voice">🎙️</button>
-                  <button type="button" className="p-1 hover:text-white rounded" title="Canvas">🎨</button>
+                  <input ref={attachmentRef} type="file" accept=".txt,.md,.json,.js,.jsx,.ts,.tsx,.py,.cpp,.h,.css,.html" onChange={attachTextFile} className="hidden" />
+                  <button type="button" onClick={() => attachmentRef.current?.click()} className="rounded p-1 hover:text-white" title="Attach text file">+</button>
+                  <button type="button" onClick={() => insertIntoPrompt('', true)} className="rounded p-1 font-serif text-[11px] hover:text-white" title="Bold selected text">Aa</button>
+                  <button type="button" onClick={() => insertIntoPrompt('🙂')} className="rounded p-1 hover:text-white" title="Insert emoji">😀</button>
+                  <button type="button" onClick={() => insertIntoPrompt('@Linear ')} className="rounded p-1 hover:text-white" title="Mention Linear Agent">@</button>
+                  <button type="button" onClick={() => insertIntoPrompt('Analyze this visual or screenshot: ')} className="rounded p-1 hover:text-white" title="Add visual analysis prompt">📹</button>
+                  <button type="button" onClick={() => insertIntoPrompt('Transcribe or clarify this spoken idea: ')} className="rounded p-1 hover:text-white" title="Add voice prompt">🎙️</button>
+                  <button type="button" onClick={() => insertIntoPrompt('Create a visual canvas-style explanation of: ')} className="rounded p-1 hover:text-white" title="Add canvas prompt">🎨</button>
                 </div>
 
                 {/* Right Purple Split Send Button (Image 1) */}
