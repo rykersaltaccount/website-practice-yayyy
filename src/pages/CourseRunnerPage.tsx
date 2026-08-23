@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import Editor from 'react-simple-code-editor';
+import RawEditor from 'react-simple-code-editor';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -12,6 +12,37 @@ import AppContext from '../contexts/AppContext';
 import type { Lesson, Drill } from '../types/course';
 import { generateCourseLesson, generateDrillTestHarness, gradeCodingExercise } from '../utils/aiProviders';
 
+interface EditorComponentProps {
+  value: string;
+  onValueChange: (value: string) => void;
+  highlight: (value: string) => string | React.ReactNode;
+  padding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  style?: React.CSSProperties;
+  textareaId?: string;
+  textareaClassName?: string;
+  preClassName?: string;
+  'aria-label'?: string;
+  disabled?: boolean;
+}
+
+// Resolve CJS / ESM default export interop for React component
+const CodeEditor: React.ComponentType<EditorComponentProps> = (() => {
+  const comp: any = RawEditor;
+  if (typeof comp === 'function' || (typeof comp === 'object' && comp !== null && '$$typeof' in comp)) {
+    return comp;
+  }
+  if (comp && typeof comp.default === 'function') {
+    return comp.default;
+  }
+  if (comp && comp.default && typeof comp.default.default === 'function') {
+    return comp.default.default;
+  }
+  if (comp && comp.default && typeof comp.default === 'object' && '$$typeof' in comp.default) {
+    return comp.default;
+  }
+  return comp?.default || comp;
+})();
+
 const normalizeLesson = (lesson: Lesson): Lesson => {
   const seen = new Set<string>();
   return {
@@ -22,6 +53,12 @@ const normalizeLesson = (lesson: Lesson): Lesson => {
       seen.add(key);
       return true;
     }),
+    drills: (lesson.drills || []).map(drill => ({
+      ...drill,
+      gradingTokens: drill.gradingTokens || [],
+      hints: drill.hints || [],
+      hiddenTests: drill.hiddenTests || [],
+    })),
   };
 };
 
@@ -48,10 +85,11 @@ int main() {
 const highlightCpp = (source: string) => {
   // Fallback safely if Prism's C++ grammar failed to mount properly
   const grammar = Prism.languages.cpp || Prism.languages.clike || {};
-  return Prism.highlight(source, grammar, 'cpp');
+  return Prism.highlight(source || '', grammar, 'cpp');
 };
 
 const removeMainFunction = (source: string): string => {
+  if (!source) return '';
   const mainStart = source.search(/\b(?:int|auto)\s+main\s*\([^)]*\)\s*\{/);
   if (mainStart < 0) return source;
   const bodyStart = source.indexOf('{', mainStart);
@@ -67,8 +105,8 @@ const removeMainFunction = (source: string): string => {
 };
 
 const composeProtectedSource = (drill: Drill, source: string): string => {
-  if (!drill.protectedMain) return source;
-  return `${removeMainFunction(source)}\n\n${drill.protectedMain.trim()}\n`;
+  if (!drill.protectedMain) return source || '';
+  return `${removeMainFunction(source || '')}\n\n${drill.protectedMain.trim()}\n`;
 };
 
 const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
@@ -93,7 +131,7 @@ const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
       a: ({ children, href }) => <a href={href} className="text-[#6ee7b7] underline decoration-[#10b981]/40 underline-offset-2 hover:text-white">{children}</a>,
     }}
   >
-    {content}
+    {content || ''}
   </ReactMarkdown>
 );
 
@@ -305,7 +343,7 @@ const CourseRunnerPage: React.FC = () => {
             ref={drillEditorRef}
             className="mt-4 min-h-48 max-h-[420px] overflow-y-auto rounded-md border border-white/[0.12] bg-[#090b0f] text-xs shadow-inner focus-within:border-[#5e6ad2]"
           >
-            <Editor
+            <CodeEditor
               value={removeMainFunction(code)}
               onValueChange={value => setCode(composeProtectedSource(activeDrill, value))}
               highlight={highlightCpp}
