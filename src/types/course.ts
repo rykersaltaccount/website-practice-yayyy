@@ -2,7 +2,7 @@ export interface Course {
   id: string;
   title: string;
   description: string;
-  level: 'Beginner' | 'Intermediate' | 'Advanced';
+  level: 'Beginner' | 'Advanced';
   modules: CourseModule[];
   createdAt: string;
   overallProgress: number;

@@ -72,6 +72,11 @@ const saveCourseToSupabase = async (userId: string, course: Course) => {
   if (error) console.error('Unable to save course:', error);
 };
 
+const normalizeCourse = (course: Course): Course => ({
+  ...course,
+  level: course.level === 'Advanced' ? 'Advanced' : 'Beginner',
+});
+
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useContext(AuthContext)!;
   const [problems, setProblems] = useState<Problem[]>(() => {
@@ -141,7 +146,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [courses, setCourses] = useState<Course[]>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('codevault-courses') || '[]');
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? parsed.map(normalizeCourse) : [];
     } catch {
       return [];
     }
@@ -187,9 +192,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
       const localCourses = JSON.parse(localStorage.getItem('codevault-courses') || '[]') as Course[];
-      const remoteItems = (remoteCourses || []).map(row => ({ ...row.data, id: row.id } as Course));
+      const remoteItems = (remoteCourses || []).map(row => normalizeCourse({ ...row.data, id: row.id } as Course));
       const remoteIds = new Set(remoteItems.map(course => course.id));
-      const localOnlyCourses = localCourses.filter(course => !remoteIds.has(course.id));
+      const localOnlyCourses = localCourses.map(normalizeCourse).filter(course => !remoteIds.has(course.id));
       if (localOnlyCourses.length > 0) await Promise.all(localOnlyCourses.map(course => saveCourseToSupabase(user.id, course)));
       const mergedCourses = [...remoteItems, ...localOnlyCourses];
       setCourses(mergedCourses);

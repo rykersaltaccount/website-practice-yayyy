@@ -83,6 +83,28 @@ const proxyAiRequest = async (request, response) => {
   response.end(await upstream.text());
 };
 
+const webSearch = async (request, response) => {
+  const body = JSON.parse(await readRequestBody(request));
+  const query = typeof body.query === 'string' ? body.query.trim() : '';
+  const apiKey = process.env.TAVILY_API_KEY?.trim();
+  if (!apiKey) {
+    sendJson(response, 503, { error: 'Web search is not configured. Set TAVILY_API_KEY on the server.' });
+    return;
+  }
+  if (!query) {
+    sendJson(response, 400, { error: 'A search query is required.' });
+    return;
+  }
+  const upstream = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, query, search_depth: 'basic', max_results: 5, include_answer: false }),
+    signal: AbortSignal.timeout(15000),
+  });
+  response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json' });
+  response.end(await upstream.text());
+};
+
 const compileAndRun = async code => {
   const folder = await mkdtemp(join(tmpdir(), 'codevault-'));
   const sourcePath = join(folder, 'main.cpp');
@@ -111,6 +133,11 @@ const server = createServer((request, response) => {
     proxyAiRequest(request, response).catch(error => {
       sendJson(response, 502, { error: `AI proxy failed: ${error instanceof Error ? error.message : String(error)}` });
     });
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/api/web-search') {
+    webSearch(request, response).catch(error => sendJson(response, 502, { error: `Web search failed: ${error instanceof Error ? error.message : String(error)}` }));
     return;
   }
 

@@ -224,6 +224,17 @@ export const generateExercises = async (
 
 type GenerationProgress = (message: string) => void;
 
+export const getWebContext = async (query: string): Promise<string> => {
+  try {
+    const response = await fetch('/api/web-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+    if (!response.ok) return '';
+    const data = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
+    return (data.results || []).map(result => `- ${result.title || 'Source'} (${result.url || 'unknown URL'}): ${(result.content || '').slice(0, 500)}`).join('\n');
+  } catch {
+    return '';
+  }
+};
+
 const requestJson = async (task: AiTask, instruction: string, temperature = 0.3, onProgress?: GenerationProgress): Promise<unknown | null> => {
   const config = getAiConfig(task);
   onProgress?.(`Preparing ${task} provider...`);
@@ -271,7 +282,11 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
 };
 
 export const generateCourseSyllabus = async (topic: string, level: Course['level'], onProgress?: GenerationProgress): Promise<Course | null> => {
-  const result = await requestJson('course-syllabus', `Create a structured C++23 systems programming course about "${topic}" for ${level} learners. Return only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for a later deep lesson writer. Do not use a marketing tone.`, 0.2, onProgress) as Omit<Course, 'id' | 'createdAt' | 'overallProgress'> | null;
+  const trackGuidance = level === 'Beginner'
+    ? 'Build from arrays and hashing fundamentals through collision handling, complexity analysis, implementation trade-offs, debugging, and progressively harder interview-style problems. End at a level suitable for passing general software engineering interviews focused on hash maps.'
+    : 'Focus on technical and production-level material: cache behavior, allocator and ownership choices, hash quality, adversarial inputs, concurrency, rehashing, load factors, custom hashers, memory layout, and performance measurement.';
+  const webContext = await getWebContext(`${topic} C++23 systems programming interview concepts`);
+  const result = await requestJson('course-syllabus', `Create a structured C++23 systems programming course about "${topic}" for the ${level} track. ${trackGuidance} Use the web research below only to improve factual accuracy; do not copy source text and do not include citations in the JSON.\nWeb research:\n${webContext || 'No web research was available.'}\nReturn only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for later deep lesson writers. Do not use a marketing tone.`, 0.2, onProgress) as Omit<Course, 'id' | 'createdAt' | 'overallProgress'> | null;
   if (!result?.title || !Array.isArray(result.modules)) return null;
   return { ...result, id: crypto.randomUUID(), createdAt: new Date().toISOString(), overallProgress: 0 };
 };
@@ -323,7 +338,8 @@ Return ONLY valid JSON matching this schema:
 Every drill and the capstone must have starterCode that is a complete, compilable C++23 program. Write the implementation scaffold and author a useful main() function with a small visible example call. Do not leave main() empty and do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
 
   // Execute a SINGLE call instead of chaining multiple calls
-  const result = await requestJson('course-lesson', prompt, 0.2, onProgress) as Partial<Lesson> | null;
+  const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
+  const result = await requestJson('course-lesson', `${prompt}\n\nUse this optional web research for factual accuracy only; do not copy it or include citations:\n${webContext || 'No web research was available.'}`, 0.2, onProgress) as Partial<Lesson> | null;
 
   if (!result || !Array.isArray(result.drills)) return null;
 

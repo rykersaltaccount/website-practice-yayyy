@@ -69,6 +69,8 @@ create policy "Users can update their courses"
 
 The app keeps `localStorage` as an offline cache and uploads local-only courses when the user signs in.
 
+Optional web grounding uses Tavily server-side. Set `TAVILY_API_KEY` in the local server environment and in Vercel project environment variables. Without it, course generation continues normally without web research.
+
 ### Building for Production
 
 To build the production version:

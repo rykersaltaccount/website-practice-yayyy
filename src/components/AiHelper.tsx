@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import AppContext from '../contexts/AppContext';
-import { getAiConfig, saveAiConfig, type AiProvider } from '../utils/aiProviders';
+import { getAiConfig, getWebContext, saveAiConfig, type AiProvider } from '../utils/aiProviders';
 
 interface Message {
   role: 'assistant' | 'user';
@@ -136,6 +136,7 @@ const AiHelper = () => {
       concepts: context.concepts.slice(-20).map(c => ({ name: c.name, description: c.description })),
       mistakes: context.mistakes.slice(-20).map(m => ({ description: m.description, reviewed: m.reviewedRecently })),
     };
+    const webContext = await getWebContext(request);
 
     let response: Response;
     const isGemini = apiProvider === 'gemini';
@@ -152,12 +153,12 @@ const AiHelper = () => {
             'Content-Type': 'application/json',
             ...(!isGemini && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
           },
-          body: isGemini ? { contents: [{ parts: [{ text: request }] }] } : {
+          body: isGemini ? { contents: [{ parts: [{ text: `${request}\n\nOptional web research:\n${webContext || 'No web research was available.'}` }] }] } : {
             model: apiModel.trim(),
             temperature: 0.3,
             messages: [
               { role: 'system', content: 'You are Linear Agent, an autonomous programming and sprint assistant for engineers. Give concise, razor-sharp technical advice and action items based on the workspace.' },
-              { role: 'user', content: `Workspace:\n${JSON.stringify(workspace)}\n\nPrompt: ${request}` },
+              { role: 'user', content: `Workspace:\n${JSON.stringify(workspace)}\n\nPrompt: ${request}\n\nOptional web research:\n${webContext || 'No web research was available.'}` },
             ],
           },
         }),
