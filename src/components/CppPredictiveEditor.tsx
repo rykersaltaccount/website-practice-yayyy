@@ -63,13 +63,13 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
-        const analysis = CppLanguageService.analyzeDocument(value);
-        setDiagnostics(analysis.diagnostics);
-        if (onDiagnosticsChange) onDiagnosticsChange(analysis.diagnostics);
+        const analysis = CppLanguageService.analyzeDocument(value || '');
+        setDiagnostics(analysis.diagnostics || []);
+        if (onDiagnosticsChange) onDiagnosticsChange(analysis.diagnostics || []);
       } catch (err) {
         console.error('C++ Analysis error:', err);
       }
-    }, 40);
+    }, 60);
 
     return () => clearTimeout(timer);
   }, [value, onDiagnosticsChange]);
@@ -84,23 +84,31 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
         return;
       }
 
-      const lines = code.slice(0, offset).split('\n');
-      const line = lines.length;
-      const column = lines[lines.length - 1].length + 1;
-      const pos: Position = { line, column, offset };
-      setCursorPos(pos);
+      try {
+        const safeOffset = Math.min(Math.max(0, offset), code.length);
+        const lines = code.slice(0, safeOffset).split('\n');
+        const line = lines.length;
+        const column = (lines[lines.length - 1] || '').length + 1;
+        const pos: Position = { line, column, offset: safeOffset };
+        setCursorPos(pos);
 
-      const analysis = CppLanguageService.analyzeDocument(code);
-      const res = CppLanguageService.getCompletions(analysis, code, pos);
+        const analysis = CppLanguageService.analyzeDocument(code);
+        const res = CppLanguageService.getCompletions(analysis, code, pos);
 
-      if (res.items.length > 0 && res.triggerPrefix.length > 0) {
-        setCompletions(res.items);
-        setGhostText(res.ghostText || '');
-        setSelectedIndex(0);
-        setIsMenuOpen(true);
-      } else {
-        setCompletions([]);
+        if (res.items.length > 0 && res.triggerPrefix.length > 0) {
+          setCompletions(res.items);
+          setGhostText(res.ghostText || '');
+          setSelectedIndex(0);
+          setIsMenuOpen(true);
+        } else {
+          setCompletions([]);
+          setGhostText('');
+          setIsMenuOpen(false);
+        }
+      } catch (err) {
+        console.error('C++ Prediction update error:', err);
         setGhostText('');
+        setCompletions([]);
         setIsMenuOpen(false);
       }
     },
@@ -109,8 +117,15 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
 
   // Syntax highlighting via Prism
   const highlightedCode = useMemo(() => {
-    const grammar = Prism.languages.cpp || Prism.languages.clike || {};
-    return Prism.highlight(value || '', grammar, 'cpp');
+    try {
+      const grammar = Prism.languages.cpp || Prism.languages.clike || {};
+      return Prism.highlight(value || '', grammar, 'cpp');
+    } catch {
+      return (value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
   }, [value]);
 
   const handleTextareaChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -131,24 +146,25 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
     if (!textareaRef.current) return;
     const offset = textareaRef.current.selectionStart;
     const lines = value.slice(0, offset).split('\n');
-    const currentLine = lines[lines.length - 1];
+    const currentLine = lines[lines.length - 1] || '';
 
     // Find prefix to replace
     const wordMatch = currentLine.match(/([a-zA-Z_]\w*)$/);
     const prefixLen = wordMatch ? wordMatch[1].length : 0;
 
     const rawInsert = item.insertText.replace(/\$\{\d+:([^}]+)\}/g, '$1').replace(/\$\{\d+\}/g, '');
-    const before = value.slice(0, offset - prefixLen);
+    const before = value.slice(0, Math.max(0, offset - prefixLen));
     const after = value.slice(offset);
     const nextCode = `${before}${rawInsert}${after}`;
 
     onChange(nextCode);
     setGhostText('');
+    setCompletions([]);
     setIsMenuOpen(false);
 
     requestAnimationFrame(() => {
       if (textareaRef.current) {
-        const nextPos = (offset - prefixLen) + rawInsert.length;
+        const nextPos = Math.min(before.length + rawInsert.length, nextCode.length);
         textareaRef.current.setSelectionRange(nextPos, nextPos);
         textareaRef.current.focus();
       }
@@ -161,11 +177,12 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
     const lines = value.split('\n');
     let startOffset = 0;
     for (let i = 0; i < range.start.line - 1; i++) {
-      startOffset += lines[i].length + 1;
+      startOffset += (lines[i] || '').length + 1;
     }
     startOffset += range.start.column - 1;
 
-    const nextCode = `${value.slice(0, startOffset)}${replacement}${value.slice(startOffset)}`;
+    const safeOffset = Math.min(Math.max(0, startOffset), value.length);
+    const nextCode = `${value.slice(0, safeOffset)}${replacement}${value.slice(safeOffset)}`;
     onChange(nextCode);
   };
 
@@ -174,7 +191,7 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
     if (e.key === 'Tab' && !e.shiftKey) {
       if (isMenuOpen && completions.length > 0) {
         e.preventDefault();
-        applyCompletion(completions[selectedIndex]);
+        applyCompletion(completions[selectedIndex] || completions[0]);
         return;
       }
       if (ghostText) {
@@ -188,6 +205,8 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
           const nextCode = `${value.slice(0, offset)}${ghostText}${value.slice(offset)}`;
           onChange(nextCode);
           setGhostText('');
+          setCompletions([]);
+          setIsMenuOpen(false);
         }
         return;
       }
@@ -216,13 +235,14 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
       }
       if (e.key === 'Enter' && completions.length > 0) {
         e.preventDefault();
-        applyCompletion(completions[selectedIndex]);
+        applyCompletion(completions[selectedIndex] || completions[0]);
         return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
         setIsMenuOpen(false);
         setGhostText('');
+        setCompletions([]);
         return;
       }
     }
@@ -233,7 +253,7 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
       const offset = textareaRef.current?.selectionStart || 0;
       const lines = value.slice(0, offset).split('\n');
       const line = lines.length;
-      const column = lines[lines.length - 1].length + 1;
+      const column = (lines[lines.length - 1] || '').length + 1;
       const pos: Position = { line, column, offset };
       const analysis = CppLanguageService.analyzeDocument(value);
       const res = CppLanguageService.getCompletions(analysis, value, pos);
@@ -360,7 +380,12 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
           {/* Autocomplete Toggle */}
           <button
             type="button"
-            onClick={() => setIsPredictorEnabled(prev => !prev)}
+            onClick={() => {
+              setIsPredictorEnabled(prev => !prev);
+              setGhostText('');
+              setCompletions([]);
+              setIsMenuOpen(false);
+            }}
             className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
               isPredictorEnabled ? 'text-[#a7f3d0] hover:text-white' : 'text-[#62666f] hover:text-[#8a8f98]'
             }`}
@@ -403,7 +428,7 @@ export const CppPredictiveEditor: React.FC<CppPredictiveEditorProps> = ({
 
         {/* Layer 3: Inline Ghost Text Banner Indicator */}
         {ghostText && isPredictorEnabled && (
-          <div className="absolute bottom-2 right-3 z-20 flex items-center gap-1.5 rounded-md border border-[#10b981]/30 bg-[#090b0f]/90 px-2 py-1 text-[11px] text-[#6ee7b7] shadow-lg backdrop-blur-sm animate-fadeIn">
+          <div className="absolute bottom-2 right-3 z-20 flex items-center gap-1.5 rounded-md border border-[#10b981]/30 bg-[#090b0f]/90 px-2 py-1 text-[11px] text-[#6ee7b7] shadow-lg backdrop-blur-sm animate-fadeIn pointer-events-none">
             <span className="font-semibold text-white">Prediction:</span>
             <span className="font-mono text-[#a7f3d0]">{ghostText}</span>
             <span className="rounded bg-white/[0.1] px-1 py-0.2 text-[9px] text-[#8a8f98]">Tab ⇥</span>

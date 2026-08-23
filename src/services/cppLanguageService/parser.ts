@@ -89,12 +89,19 @@ export class CppParser {
   }
 
   public parse(): CppAnalysisResult {
-    while (this.current < this.tokens.length) {
+    let safetyCounter = this.tokens.length * 4 + 100;
+
+    while (this.current < this.tokens.length && safetyCounter-- > 0) {
+      const prevCurrent = this.current;
       try {
         this.parseTopLevelItem();
       } catch {
-        // Fault-tolerance: Recover to next semicolon or brace
         this.recover();
+      }
+
+      // Guarantee forward progression to prevent any infinite loops
+      if (this.current <= prevCurrent) {
+        this.advance();
       }
     }
 
@@ -186,7 +193,8 @@ export class CppParser {
 
     if (this.match('<')) {
       this.advance();
-      while (this.peek() && !this.match('>')) {
+      let limit = 50;
+      while (this.peek() && !this.match('>') && limit-- > 0) {
         moduleName += this.advance()!.value;
       }
       if (this.match('>')) this.advance();
@@ -242,14 +250,17 @@ export class CppParser {
     };
     this.addSymbol(symbol);
 
+    let safety = 100;
     // Skip inheritance up to '{' or ';'
-    while (this.peek() && !this.match('{', ';')) {
+    while (this.peek() && !this.match('{', ';') && safety-- > 0) {
       this.advance();
     }
 
     if (this.match('{')) {
       const brace = this.advance()!;
       this.pushScope(kind, name, brace);
+    } else if (this.match(';')) {
+      this.advance();
     }
   }
 
@@ -266,7 +277,8 @@ export class CppParser {
       });
     }
 
-    while (this.peek() && !this.match(';')) {
+    let safety = 100;
+    while (this.peek() && !this.match(';') && safety-- > 0) {
       this.advance();
     }
     if (this.match(';')) this.advance();
@@ -277,7 +289,8 @@ export class CppParser {
     if (this.match('<')) {
       this.advance();
       let depth = 1;
-      while (this.peek() && depth > 0) {
+      let safety = 200;
+      while (this.peek() && depth > 0 && safety-- > 0) {
         if (this.match('<')) depth++;
         else if (this.match('>')) depth--;
         this.advance();
@@ -301,16 +314,21 @@ export class CppParser {
 
     // Type or auto
     const typeTokens: string[] = [];
-    while (this.peek() && (this.peek()!.type === 'type' || this.peek()!.type === 'identifier' || this.match('::', '<', '>', '*', '&', '&&', 'auto', 'decltype'))) {
+    let safety = 50;
+    while (
+      this.peek() &&
+      safety-- > 0 &&
+      (this.peek()!.type === 'type' || this.peek()!.type === 'identifier' || this.match('::', '<', '>', '*', '&', '&&', 'auto', 'decltype'))
+    ) {
       if (this.peek(1)?.value === '(' && !['auto', 'decltype', 'void', 'int', 'bool', 'char', 'double', 'float'].includes(this.peek()!.value)) {
-        // Looks like a function name without explicit type or constructor
         break;
       }
       typeTokens.push(this.advance()!.value);
       if (this.match('<')) {
         let depth = 1;
+        let tLimit = 100;
         typeTokens.push(this.advance()!.value);
-        while (this.peek() && depth > 0) {
+        while (this.peek() && depth > 0 && tLimit-- > 0) {
           if (this.match('<')) depth++;
           else if (this.match('>')) depth--;
           typeTokens.push(this.advance()!.value);
@@ -325,13 +343,14 @@ export class CppParser {
 
     // Identifier or Operator (e.g. operator[])
     let name = '';
-    let nameToken = this.peek();
+    const nameToken = this.peek();
 
     if (this.match('operator')) {
       this.advance(); // 'operator'
       let op = '';
       if (this.match('[', ']')) {
-        while (this.match('[', ']', '(', ')', '+', '-', '*', '/', '=', '<', '>', '!')) {
+        let opLimit = 20;
+        while (this.match('[', ']', '(', ')', '+', '-', '*', '/', '=', '<', '>', '!') && opLimit-- > 0) {
           op += this.advance()!.value;
         }
         name = `operator${op}`;
@@ -369,14 +388,16 @@ export class CppParser {
       if (this.match('->')) {
         this.advance();
         const trailing: string[] = [];
-        while (this.peek() && !this.match('{', ';', 'noexcept', 'const', 'requires')) {
+        let tLimit = 50;
+        while (this.peek() && !this.match('{', ';', 'noexcept', 'const', 'requires') && tLimit-- > 0) {
           trailing.push(this.advance()!.value);
         }
         funcSymbol.type = trailing.join(' ');
       }
 
       // Constraints / qualifiers
-      while (this.peek() && !this.match('{', ';')) {
+      let qLimit = 50;
+      while (this.peek() && !this.match('{', ';') && qLimit-- > 0) {
         this.advance();
       }
 
@@ -401,8 +422,9 @@ export class CppParser {
     };
     this.addSymbol(varSymbol);
 
-    // Skip initializer up to ';' or ','
-    while (this.peek() && !this.match(';', '{')) {
+    // Skip initializer up to ';' or '{'
+    let sLimit = 100;
+    while (this.peek() && !this.match(';', '{') && sLimit-- > 0) {
       this.advance();
     }
     if (this.match(';')) {
@@ -413,8 +435,9 @@ export class CppParser {
   private parseFunctionParameters() {
     this.advance(); // '('
     let depth = 1;
+    let pLimit = 200;
 
-    while (this.peek() && depth > 0) {
+    while (this.peek() && depth > 0 && pLimit-- > 0) {
       if (this.match('(')) {
         depth++;
         this.advance();
@@ -435,7 +458,12 @@ export class CppParser {
       }
 
       const paramTypeTokens: string[] = [];
-      while (this.peek() && (this.peek()!.type === 'type' || this.peek()!.type === 'identifier' || this.match('::', '<', '>', '*', '&', '&&', 'const', 'auto'))) {
+      let typeLimit = 30;
+      while (
+        this.peek() &&
+        typeLimit-- > 0 &&
+        (this.peek()!.type === 'type' || this.peek()!.type === 'identifier' || this.match('::', '<', '>', '*', '&', '&&', 'const', 'auto'))
+      ) {
         if (this.peek()?.type === 'identifier' && (this.peek(1)?.value === ',' || this.peek(1)?.value === ')' || this.peek(1)?.value === '=')) {
           break;
         }
@@ -457,7 +485,8 @@ export class CppParser {
 
       // Skip default argument if any
       if (this.match('=')) {
-        while (this.peek() && !this.match(',', ')')) {
+        let dLimit = 50;
+        while (this.peek() && !this.match(',', ')') && dLimit-- > 0) {
           this.advance();
         }
       }
@@ -468,14 +497,16 @@ export class CppParser {
 
   private readQualifiedName(): string {
     let name = '';
-    while (this.peek() && (this.peek()!.type === 'identifier' || this.peek()!.type === 'type' || this.match('::'))) {
+    let limit = 50;
+    while (this.peek() && limit-- > 0 && (this.peek()!.type === 'identifier' || this.peek()!.type === 'type' || this.match('::'))) {
       name += this.advance()!.value;
     }
     return name;
   }
 
   private recover() {
-    while (this.peek()) {
+    let limit = 50;
+    while (this.peek() && limit-- > 0) {
       const tok = this.advance();
       if (!tok) break;
       if (tok.value === ';' || tok.value === '}') {

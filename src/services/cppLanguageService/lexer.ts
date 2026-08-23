@@ -68,8 +68,10 @@ export class CppLexer {
 
   public tokenize(): Token[] {
     const tokens: Token[] = [];
+    let safetyCounter = this.length * 4 + 100;
 
-    while (this.index < this.length) {
+    while (this.index < this.length && safetyCounter-- > 0) {
+      const prevIndex = this.index;
       const startPos = this.getPosition();
       const ch = this.charAt();
 
@@ -87,6 +89,7 @@ export class CppLexer {
           value,
           range: { start: startPos, end: this.getPosition() },
         });
+        if (this.index <= prevIndex) this.advance();
         continue;
       }
 
@@ -101,6 +104,7 @@ export class CppLexer {
           value,
           range: { start: startPos, end: this.getPosition() },
         });
+        if (this.index <= prevIndex) this.advance();
         continue;
       }
 
@@ -117,11 +121,15 @@ export class CppLexer {
           value,
           range: { start: startPos, end: this.getPosition() },
         });
+        if (this.index <= prevIndex) this.advance();
         continue;
       }
 
       // Raw String Literal R"(...)"
-      if ((ch === 'R' || ch === 'u' || ch === 'U' || ch === 'L') && this.charAt(1) === '"' || (ch === 'u' && this.charAt(1) === '8' && this.charAt(2) === 'R' && this.charAt(3) === '"')) {
+      if (
+        ((ch === 'R' || ch === 'u' || ch === 'U' || ch === 'L') && this.charAt(1) === '"') ||
+        (ch === 'u' && this.charAt(1) === '8' && this.charAt(2) === 'R' && this.charAt(3) === '"')
+      ) {
         const rawMatch = this.source.slice(this.index).match(/^(?:u8R|uR|UR|LR|R)"([^(]*)\(([\s\S]*?)\)\1"/);
         if (rawMatch) {
           const literal = this.advance(rawMatch[0].length);
@@ -135,28 +143,38 @@ export class CppLexer {
       }
 
       // Standard String Literal
-      if (ch === '"' || ((ch === 'u' || ch === 'U' || ch === 'L') && this.charAt(1) === '"') || (ch === 'u' && this.charAt(1) === '8' && this.charAt(2) === '"')) {
+      if (
+        ch === '"' ||
+        ((ch === 'u' || ch === 'U' || ch === 'L') && this.charAt(1) === '"') ||
+        (ch === 'u' && this.charAt(1) === '8' && this.charAt(2) === '"')
+      ) {
         const value = this.readString();
         tokens.push({
           type: 'string',
           value,
           range: { start: startPos, end: this.getPosition() },
         });
+        if (this.index <= prevIndex) this.advance();
         continue;
       }
 
       // Character Literal
-      if (ch === '\'' || ((ch === 'u' || ch === 'U' || ch === 'L') && this.charAt(1) === '\'') || (ch === 'u' && this.charAt(1) === '8' && this.charAt(2) === '\'')) {
+      if (
+        ch === '\'' ||
+        ((ch === 'u' || ch === 'U' || ch === 'L') && this.charAt(1) === '\'') ||
+        (ch === 'u' && this.charAt(1) === '8' && this.charAt(2) === '\'')
+      ) {
         const value = this.readChar();
         tokens.push({
           type: 'character',
           value,
           range: { start: startPos, end: this.getPosition() },
         });
+        if (this.index <= prevIndex) this.advance();
         continue;
       }
 
-      // Numeric Literal (including C++23 1uz, 1z, 1.0f16, 1.0bf16, binary 0b1011'0010)
+      // Numeric Literal
       if (/\d/.test(ch) || (ch === '.' && /\d/.test(this.charAt(1)))) {
         const value = this.readNumber();
         tokens.push({
@@ -164,6 +182,7 @@ export class CppLexer {
           value,
           range: { start: startPos, end: this.getPosition() },
         });
+        if (this.index <= prevIndex) this.advance();
         continue;
       }
 
@@ -183,6 +202,7 @@ export class CppLexer {
           value,
           range: { start: startPos, end: this.getPosition() },
         });
+        if (this.index <= prevIndex) this.advance();
         continue;
       }
 
