@@ -5,6 +5,7 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-clike';
+import 'prismjs/components/prism-c';     // C++ requires 'c' first!
 import 'prismjs/components/prism-cpp';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
