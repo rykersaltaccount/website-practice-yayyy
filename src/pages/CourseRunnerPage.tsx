@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
 import type { Lesson, Drill } from '../types/course';
-import { generateCourseLesson, gradeCodingExercise } from '../utils/aiProviders';
+import { generateCourseLesson, generateDrillTestHarness, gradeCodingExercise } from '../utils/aiProviders';
 
 const normalizeLesson = (lesson: Lesson): Lesson => {
   const seen = new Set<string>();
@@ -38,6 +38,26 @@ int main() {
   return 0;
 }
 `;
+};
+
+const removeMainFunction = (source: string): string => {
+  const mainStart = source.search(/\b(?:int|auto)\s+main\s*\([^)]*\)\s*\{/);
+  if (mainStart < 0) return source;
+  const bodyStart = source.indexOf('{', mainStart);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return `${source.slice(0, mainStart)}${source.slice(index + 1)}`.trim();
+    }
+  }
+  return source;
+};
+
+const composeProtectedSource = (drill: Drill, source: string): string => {
+  if (!drill.protectedMain) return source;
+  return `${removeMainFunction(source)}\n\n${drill.protectedMain.trim()}\n`;
 };
 
 const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
@@ -81,6 +101,7 @@ const CourseRunnerPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [generationStage, setGenerationStage] = useState('');
   const [generationError, setGenerationError] = useState('');
+  const [harnessLoading, setHarnessLoading] = useState(false);
   const generatedLessonKey = useRef<string | null>(null);
   const drillEditorRef = useRef<HTMLTextAreaElement>(null);
   const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
@@ -99,8 +120,22 @@ const CourseRunnerPage: React.FC = () => {
   }, [code, drillIndex, lesson?.drills, lesson?.capstone]);
 
   useEffect(() => {
-    setCode(activeDrill ? getStarterCode(activeDrill) : '');
+    setCode(activeDrill ? composeProtectedSource(activeDrill, getStarterCode(activeDrill)) : '');
   }, [activeDrill?.id]);
+
+  useEffect(() => {
+    if (!activeDrill || activeDrill.protectedMain || harnessLoading) return;
+    setHarnessLoading(true);
+    void generateDrillTestHarness(activeDrill)
+      .then(protectedMain => {
+        if (!protectedMain) return;
+        const updatedDrill = { ...activeDrill, protectedMain };
+        setLesson(current => current ? { ...current, drills: current.drills?.map(drill => drill.id === updatedDrill.id ? updatedDrill : drill), capstone: current.capstone?.id === updatedDrill.id ? { ...current.capstone, ...updatedDrill } : current.capstone } : current);
+        setCode(composeProtectedSource(updatedDrill, getStarterCode(updatedDrill)));
+        updateCourse(course?.id || '', { modules: course?.modules.map(module => ({ ...module, lessons: module.lessons.map(item => item.id === lesson?.id ? { ...item, drills: item.drills?.map(drill => drill.id === updatedDrill.id ? updatedDrill : drill), capstone: item.capstone?.id === updatedDrill.id ? { ...item.capstone, ...updatedDrill } : item.capstone } : item) })) || [] });
+      })
+      .finally(() => setHarnessLoading(false));
+  }, [activeDrill?.id, activeDrill?.protectedMain]);
 
   useEffect(() => {
     const lessonKey = `${courseId || ''}:${lessonId || ''}`;
@@ -147,7 +182,7 @@ const CourseRunnerPage: React.FC = () => {
     let compilerPassed = true;
     let compilerOutput = '';
     try {
-      const response = await fetch('/api/compile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, filename: 'course-drill.cpp' }) });
+      const response = await fetch('/api/compile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: composeProtectedSource(activeDrill, code), filename: 'course-drill.cpp' }) });
       if (response.ok) {
         const result = await response.json() as { ok?: boolean; output?: string };
         compilerPassed = result.ok !== false;
@@ -164,7 +199,7 @@ const CourseRunnerPage: React.FC = () => {
       setFeedback(`Compilation failed:\n${compilerOutput || 'The compiler rejected the submission.'}`);
       return;
     }
-    const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, code, 'course-grading');
+    const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, composeProtectedSource(activeDrill, code), 'course-grading');
     const passed = compilerPassed && (aiPassed ?? (code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token))));
     if (passed) {
       const finishedMessage = `Drill ${drillIndex + 1} Finished.`;
@@ -207,7 +242,7 @@ const CourseRunnerPage: React.FC = () => {
               <button type="button" onClick={() => setActiveTab('checks')} className={`px-2 py-1 text-xs ${activeTab === 'checks' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>Concept Checks</button>
               <button type="button" onClick={() => setActiveTab('drills')} className={`px-2 py-1 text-xs ${activeTab === 'drills' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>C++ Drills</button>
             </div>
-            {activeTab === 'checks' ? <div className="mt-4 space-y-4"><p className="text-xs text-[#8a8f98]">{completedChecks}/{(lesson.conceptChecks || []).length} checks correct</p>{(lesson.conceptChecks || []).map(check => <div key={check.id} className="rounded-lg border border-white/[0.08] p-4"><p className="text-sm font-semibold text-white">{check.question}</p><div className="mt-3 grid gap-2">{check.options.map((option, index) => <button key={option} type="button" onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))} className={`rounded-md border px-3 py-2 text-left text-xs ${checkAnswers[check.id] === index ? (index === check.correctIndex ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]' : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]') : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'}`}>{option}</button>)}</div>{checkAnswers[check.id] !== undefined && <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>}</div>)}</div> : <div className="mt-4 flex flex-col">{activeDrill ? <><p className="text-xs font-semibold text-white">{activeDrill.title}</p><div className="mt-3 text-xs leading-6 text-[#b7bbc3]"><LessonMarkdown content={activeDrill.instructions} /></div>{completionNotice && <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">{completionNotice}</p>}<textarea ref={drillEditorRef} value={code} onChange={event => setCode(event.target.value)} className="linear-input mt-4 min-h-48 max-h-[420px] resize-none overflow-y-auto p-3 font-mono text-xs" aria-label={`${activeDrill.title} C++ starter code`} /><button type="button" onClick={() => void submitDrill()} className="linear-btn-primary mt-3 px-4 py-2 text-xs font-semibold">Run and grade drill</button><p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">{feedback}</p></> : <p className="text-xs text-[#8a8f98]">No drills available yet.</p>}</div>}
+            {activeTab === 'checks' ? <div className="mt-4 space-y-4"><p className="text-xs text-[#8a8f98]">{completedChecks}/{(lesson.conceptChecks || []).length} checks correct</p>{(lesson.conceptChecks || []).map(check => <div key={check.id} className="rounded-lg border border-white/[0.08] p-4"><p className="text-sm font-semibold text-white">{check.question}</p><div className="mt-3 grid gap-2">{check.options.map((option, index) => <button key={option} type="button" onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))} className={`rounded-md border px-3 py-2 text-left text-xs ${checkAnswers[check.id] === index ? (index === check.correctIndex ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]' : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]') : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'}`}>{option}</button>)}</div>{checkAnswers[check.id] !== undefined && <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>}</div>)}</div> : <div className="mt-4 flex flex-col">{activeDrill ? <><p className="text-xs font-semibold text-white">{activeDrill.title}</p><div className="mt-3 text-xs leading-6 text-[#b7bbc3]"><LessonMarkdown content={activeDrill.instructions} /></div>{completionNotice && <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">{completionNotice}</p>}{harnessLoading && <p className="mt-3 text-xs text-[#8a8f98]">Preparing private tests...</p>}<textarea ref={drillEditorRef} value={removeMainFunction(code)} onChange={event => setCode(composeProtectedSource(activeDrill, event.target.value))} className="linear-input mt-4 min-h-48 max-h-[420px] resize-none overflow-y-auto p-3 font-mono text-xs" aria-label={`${activeDrill.title} editable C++ implementation`} /><div className="mt-3 flex items-center gap-2"><span className="text-[10px] text-[#62666f]">AI tests are protected and run separately.</span><button type="button" onClick={() => void submitDrill()} disabled={harnessLoading} className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold disabled:cursor-wait disabled:opacity-50">{harnessLoading ? 'Preparing tests...' : 'Run and grade drill'}</button></div><p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">{feedback}</p>{activeDrill.protectedMain && <textarea value={activeDrill.protectedMain} readOnly className="sr-only" aria-label="Protected AI test harness" />}</> : <p className="text-xs text-[#8a8f98]">No drills available yet.</p>}</div>}
           </aside>
         </div>
       )}

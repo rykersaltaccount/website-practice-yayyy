@@ -1,5 +1,5 @@
 import type { Concept } from '../types';
-import type { Course, Lesson } from '../types/course';
+import type { Course, Drill, Lesson } from '../types/course';
 import { jsonrepair } from 'jsonrepair';
 
 export type AiTask = 'practice' | 'test' | 'helper' | 'course' | 'course-syllabus' | 'course-lesson' | 'course-reading' | 'course-grading';
@@ -375,6 +375,25 @@ Every drill and the capstone must have starterCode that is a complete, compilabl
     drills: result.drills || [],
     capstone: result.capstone,
   };
+};
+
+export const generateDrillTestHarness = async (drill: Pick<Drill, 'title' | 'instructions' | 'starterCode' | 'solution' | 'hiddenTests'>): Promise<string | null> => {
+  const prompt = `Create a protected C++23 test harness for this coding drill.
+Title: ${drill.title}
+Requirements: ${drill.instructions}
+Starter context: ${drill.starterCode}
+Reference solution (use only to design tests): ${drill.solution}
+Private test ideas: ${(drill.hiddenTests || []).join(' | ')}
+
+Return ONLY valid JSON in this exact shape: {"mainCode":"..."}.
+mainCode must be a complete int main() function containing exactly 10 independent tests derived from the requirements. Label each test with a comment exactly like // TEST 1 through // TEST 10. Use assertions or clear pass/fail checks and return a nonzero exit code when any test fails. Do not include the reference solution in mainCode. Do not include hidden test explanations or expected answers outside the code. The learner must implement the API that mainCode calls.`;
+  try {
+    const result = await requestJson('course-grading', prompt, 0) as { mainCode?: string } | null;
+    const testLabels = result?.mainCode?.match(/\/\/\s*TEST\s+(?:[1-9]|10)\b/gi) || [];
+    return result?.mainCode && /\bmain\s*\(/.test(result.mainCode) && testLabels.length === 10 ? result.mainCode : null;
+  } catch {
+    return null;
+  }
 };
 
 export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<boolean | null> => {
