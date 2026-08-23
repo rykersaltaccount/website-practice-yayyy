@@ -33,12 +33,11 @@ const cleanCodeSnippet = (rawCode: string) => {
     .replace(/^```[a-z]*\s*\n?/i, '') // Removes leading ```cpp or ```
     .replace(/\s*```\s*$/, '')        // Removes trailing ```
     .split('\n')
-    // Only filter out lines that are strictly a rogue standalone '#' or 'i'
-    // Do NOT filter out empty lines (length === 0) so pressing Enter works normally!
+    // Only filter out lines that are strictly a rogue standalone '#' artifact
+    // Do NOT filter out 'i', because it's needed for 'int', 'if', loops, etc.
     .filter(line => {
       const trimmed = line.trim();
-      if (trimmed === '#' || trimmed === 'i') return false;
-      return true; 
+      return trimmed !== '#'; 
     })
     .join('\n');
 };
