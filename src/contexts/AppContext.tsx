@@ -40,6 +40,7 @@ interface AppContextType {
   courses: Course[];
   addCourse: (course: Course) => void;
   updateCourse: (id: string, updates: Partial<Course>) => void;
+  deleteCourse: (id: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -280,6 +281,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     if (user && updatedCourse) void saveCourseToSupabase(user.id, updatedCourse);
     return next;
   });
+  const deleteCourse = (id: string) => {
+    setCourses(prev => prev.filter(course => course.id !== id));
+    if (user && supabase) void supabase.from('courses').delete().eq('id', id).eq('user_id', user.id).then(({ error }) => {
+      if (error) console.error('Unable to delete course:', error);
+    });
+  };
 
   // Problem functions
   const addProblem = (problem: Omit<Problem, 'id'>) => {
@@ -507,6 +514,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       courses,
       addCourse,
       updateCourse,
+      deleteCourse,
     }}>
       {children}
     </AppContext.Provider>
