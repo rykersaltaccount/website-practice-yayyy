@@ -61,8 +61,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             .eq('id', session.user.id)
             .single();
 
-          // Handle case where users table doesn't exist (404 error)
-          if (userError && userError.status === 404) {
+          // Handle case where users table doesn't exist
+          const isTableMissing = userError && (
+            // Check for PostgreSQL undefined_table error
+            userError.code === '42P01' ||
+            // Check error message for common "table not found" patterns
+            (userError.message && (
+              userError.message.includes('could not find relation') ||
+              userError.message.includes('does not exist') ||
+              userError.message.includes('not found')
+            ))
+          );
+
+          if (isTableMissing) {
             // Users table doesn't exist, create user from session data only
             const newUser: User = {
               id: session.user.id,
@@ -103,7 +114,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               .from('users')
               .upsert(newUser, { onConflict: 'id' });
 
-            if (upsertError && upsertError.status !== 404) {
+            const isUpsertTableMissing = upsertError && (
+              upsertError.code === '42P01' ||
+              (upsertError.message && (
+                upsertError.message.includes('could not find relation') ||
+                upsertError.message.includes('does not exist') ||
+                upsertError.message.includes('not found')
+              ))
+            );
+
+            if (upsertError && !isUpsertTableMissing) {
               // Only throw error if it's not a missing table error
               throw upsertError;
             }
@@ -150,8 +170,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             .eq('id', session.user.id)
             .single();
 
-          // Handle case where users table doesn't exist (404 error)
-          if (error && error.status === 404) {
+          // Handle case where users table doesn't exist
+          const isTableMissing = error && (
+            // Check for PostgreSQL undefined_table error
+            error.code === '42P01' ||
+            // Check error message for common "table not found" patterns
+            (error.message && (
+              error.message.includes('could not find relation') ||
+              error.message.includes('does not exist') ||
+              error.message.includes('not found')
+            ))
+          );
+
+          if (isTableMissing) {
             // Users table doesn't exist, create user from session data only
             const newUser: User = {
               id: session.user.id,
@@ -169,30 +200,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               error: null
             }));
           } else if (!error && userData) {
-            setAuthState(prev => ({ 
-              ...prev, 
+            // User profile exists
+            setAuthState(prev => ({
+              ...prev,
               user: userData as User,
               isLoading: false,
               error: null
             }));
           } else {
-            // Create profile if missing
+            // Create profile if missing (and table exists)
             const newUser: User = {
               id: session.user.id,
               email: session.user.email || '',
-              name: session.user.user_metadata?.full_name || 
+              name: session.user.user_metadata?.full_name ||
                       session.user.email?.split('@')[0] || 'User',
               avatarUrl: session.user.user_metadata?.avatar_url || '',
               role: 'user',
               createdAt: session.user.created_at || new Date().toISOString(),
             };
-            
-            await supabase!
+
+            const { error: upsertError } = await supabase!
               .from('users')
               .upsert(newUser, { onConflict: 'id' });
-              
-            setAuthState(prev => ({ 
-              ...prev, 
+
+            const isUpsertTableMissing = upsertError && (
+              upsertError.code === '42P01' ||
+              (upsertError.message && (
+                upsertError.message.includes('could not find relation') ||
+                upsertError.message.includes('does not exist') ||
+                upsertError.message.includes('not found')
+              ))
+            );
+
+            if (upsertError && !isUpsertTableMissing) {
+              // Only throw error if it's not a missing table error
+              throw upsertError;
+            }
+
+            setAuthState(prev => ({
+              ...prev,
               user: newUser,
               isLoading: false,
               error: null
