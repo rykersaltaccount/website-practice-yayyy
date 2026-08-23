@@ -50,9 +50,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
-        
+
         if (error) throw error;
-        
+
         if (session?.user) {
           // Fetch or create user profile in our public.users table
           const { data: userData, error: userError } = await supabase
@@ -60,33 +60,56 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             .select('*')
             .eq('id', session.user.id)
             .single();
-          
-          if (!userError && userData) {
-            // User profile exists
-            setAuthState(prev => ({ 
-              ...prev, 
-              user: userData as User,
-              isLoading: false,
-              error: null
-            }));
-          } else {
-            // Create user profile if it doesn't exist
+
+          // Handle case where users table doesn't exist (404 error)
+          if (userError && userError.status === 404) {
+            // Users table doesn't exist, create user from session data only
             const newUser: User = {
               id: session.user.id,
               email: session.user.email || '',
-              name: session.user.user_metadata?.full_name || 
+              name: session.user.user_metadata?.full_name ||
                       session.user.email?.split('@')[0] || 'User',
               avatarUrl: session.user.user_metadata?.avatar_url || '',
               role: 'user',
               createdAt: session.user.created_at || new Date().toISOString(),
             };
-            
-            await supabase
+            setAuthState(prev => ({
+              ...prev,
+              user: newUser,
+              isLoading: false,
+              error: null
+            }));
+          } else if (!userError && userData) {
+            // User profile exists
+            setAuthState(prev => ({
+              ...prev,
+              user: userData as User,
+              isLoading: false,
+              error: null
+            }));
+          } else {
+            // Create user profile if it doesn't exist (and table exists)
+            const newUser: User = {
+              id: session.user.id,
+              email: session.user.email || '',
+              name: session.user.user_metadata?.full_name ||
+                      session.user.email?.split('@')[0] || 'User',
+              avatarUrl: session.user.user_metadata?.avatar_url || '',
+              role: 'user',
+              createdAt: session.user.created_at || new Date().toISOString(),
+            };
+
+            const { error: upsertError } = await supabase
               .from('users')
               .upsert(newUser, { onConflict: 'id' });
-              
-            setAuthState(prev => ({ 
-              ...prev, 
+
+            if (upsertError && upsertError.status !== 404) {
+              // Only throw error if it's not a missing table error
+              throw upsertError;
+            }
+
+            setAuthState(prev => ({
+              ...prev,
               user: newUser,
               isLoading: false,
               error: null
@@ -94,20 +117,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }
         } else {
           // No session
-          setAuthState(prev => ({ 
-            ...prev, 
-            user: null, 
-            isLoading: false, 
-            error: null 
+          setAuthState(prev => ({
+            ...prev,
+            user: null,
+            isLoading: false,
+            error: null
           }));
         }
       } catch (error: any) {
         console.error('Auth initialization error:', error);
-        setAuthState(prev => ({ 
-          ...prev, 
-          user: null, 
-          isLoading: false, 
-          error: error.message || 'Authentication error' 
+        setAuthState(prev => ({
+          ...prev,
+          user: null,
+          isLoading: false,
+          error: error.message || 'Authentication error'
         }));
       }
     };
@@ -126,8 +149,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             .select('*')
             .eq('id', session.user.id)
             .single();
-          
-          if (!error && userData) {
+
+          // Handle case where users table doesn't exist (404 error)
+          if (error && error.status === 404) {
+            // Users table doesn't exist, create user from session data only
+            const newUser: User = {
+              id: session.user.id,
+              email: session.user.email || '',
+              name: session.user.user_metadata?.full_name ||
+                      session.user.email?.split('@')[0] || 'User',
+              avatarUrl: session.user.user_metadata?.avatar_url || '',
+              role: 'user',
+              createdAt: session.user.created_at || new Date().toISOString(),
+            };
+            setAuthState(prev => ({
+              ...prev,
+              user: newUser,
+              isLoading: false,
+              error: null
+            }));
+          } else if (!error && userData) {
             setAuthState(prev => ({ 
               ...prev, 
               user: userData as User,
