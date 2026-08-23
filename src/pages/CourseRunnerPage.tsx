@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
 import type { Lesson, Drill } from '../types/course';
-import { generateCourseLesson, generateDrillTestHarness, gradeCodingExercise } from '../utils/aiProviders';
+import { generateCourseLesson, gradeCodingExercise } from '../utils/aiProviders';
 import { CppPredictiveEditor } from '../components/CppPredictiveEditor';
 
 const normalizeLesson = (lesson: Lesson): Lesson => {
@@ -124,7 +124,6 @@ const CourseRunnerPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [generationStage, setGenerationStage] = useState('');
   const [generationError, setGenerationError] = useState('');
-  const [harnessLoading, setHarnessLoading] = useState(false);
   const generatedLessonKey = useRef<string | null>(null);
   const drillEditorRef = useRef<HTMLDivElement>(null);
   const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
@@ -148,24 +147,7 @@ const CourseRunnerPage: React.FC = () => {
     setCode(cleanCodeSnippet(rawCode));
   }, [activeDrill?.id]);
 
-  useEffect(() => {
-    if (!activeDrill || activeDrill.protectedMain || harnessLoading) return;
-    setHarnessLoading(true);
-    void generateDrillTestHarness(activeDrill)
-      .then(protectedMain => {
-        if (!protectedMain) return;
-        const updatedDrill = { ...activeDrill, protectedMain };
-        setLesson(current => current ? { ...current, drills: current.drills?.map(drill => drill.id === updatedDrill.id ? updatedDrill : drill), capstone: current.capstone?.id === updatedDrill.id ? { ...current.capstone, ...updatedDrill } : current.capstone } : current);
-        
-        // 3. Sanitize the code here when test harness finishes generating
-        const rawCode = composeProtectedSource(updatedDrill, getStarterCode(updatedDrill));
-        setCode(cleanCodeSnippet(rawCode));
-
-        updateCourse(course?.id || '', { modules: course?.modules.map(module => ({ ...module, lessons: module.lessons.map(item => item.id === lesson?.id ? { ...item, drills: item.drills?.map(drill => drill.id === updatedDrill.id ? updatedDrill : drill), capstone: item.capstone?.id === updatedDrill.id ? { ...item.capstone, ...updatedDrill } : item.capstone } : item) })) || [] });
-      })
-      .finally(() => setHarnessLoading(false));
-  }, [activeDrill?.id, activeDrill?.protectedMain]);
-
+  
   useEffect(() => {
     const lessonKey = `${courseId || ''}:${lessonId || ''}`;
     if (!course || !sourceLesson || sourceLesson.contentMarkdown || generatedLessonKey.current === lessonKey) return;
@@ -207,29 +189,9 @@ const CourseRunnerPage: React.FC = () => {
 
   const submitDrill = async () => {
     if (!activeDrill) return;
-      setFeedback('Compiling and checking...');
-      let compilerPassed = true;
-      let compilerOutput = '';
-      try {
-        const response = await fetch('/api/compile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: composeProtectedSource(activeDrill, code), filename: 'course-drill.cpp' }) });
-        if (response.ok) {
-          const result = await response.json() as { ok?: boolean; output?: string };
-          compilerPassed = result.ok !== false;
-          compilerOutput = result.output || '';
-        } else {
-          compilerPassed = false;
-          compilerOutput = (await response.text()).slice(0, 2000);
-        }
-      } catch (error) {
-        compilerPassed = false;
-        compilerOutput = error instanceof Error ? error.message : 'Compiler service unavailable.';
-      }
-      if (!compilerPassed) {
-        setFeedback(`Compilation failed:\n${compilerOutput || 'The compiler rejected the submission.'}`);
-        return;
-      }
+      setFeedback('Checking with AI...');
       const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, composeProtectedSource(activeDrill, code), 'course-grading');
-      const passed = compilerPassed && (aiPassed ?? (code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token))));
+      const passed = aiPassed ?? (code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token)));
       if (passed) {
         const finishedMessage = `Drill ${drillIndex + 1} Finished.`;
         setFeedback(finishedMessage);
@@ -238,7 +200,7 @@ const CourseRunnerPage: React.FC = () => {
         else setDrillIndex(index => index + 1);
         setCode('');
       } else {
-        setFeedback(aiPassed === null ? 'The solution compiled, but AI grading was unavailable. Check the grading provider and try again.' : 'The solution compiled but did not pass the hidden tests. Review the requirements and try again.');
+        setFeedback(aiPassed === null ? 'AI grading was unavailable. Check the grading provider and try again.' : 'The solution did not pass the hidden tests. Review the requirements and try again.');
         addMistake({ description: `Failed course drill: ${activeDrill.title}`, example: code || 'No code submitted.', relatedConcept: '', relatedProblems: [], learningLog: 'Review the lesson and retry the drill.', reviewedRecently: false });
       }
     };
@@ -316,37 +278,13 @@ const CourseRunnerPage: React.FC = () => {
               {completionNotice}
             </p>
           )}
-          {harnessLoading && (
-            <p className="mt-3 text-xs text-[#8a8f98]">Preparing private tests...</p>
-          )}
-          <div ref={drillEditorRef} className="mt-4">
+                    <div ref={drillEditorRef} className="mt-4">
             <CppPredictiveEditor
               id={`${activeDrill.id}-code`}
-              value={activeDrill && activeDrill.protectedMain
-                ? removeMainFunction(code.substring(0, code.length - (activeDrill.protectedMain.trim().length + 3)))
-                : removeMainFunction(code)}
+              value={removeMainFunction(code)}
               onChange={(userEditableValue) => {
-                // Protect the AI-generated test harness from user modifications
-                if (!activeDrill?.protectedMain) {
-                  // Clean the input to remove any stray artifacts before storing
-                  setCode(cleanCodeSnippet(userEditableValue));
-                  return;
-                }
-
-                // Clean the input to remove any stray artifacts
-                const cleanedInput = cleanCodeSnippet(userEditableValue);
-                const protectedMain = activeDrill.protectedMain.trim();
-                const trimmedValue = cleanedInput.trimEnd();
-                let userCode = trimmedValue;
-
-                // Ensure we strip out any accidental inclusion of the protected test harness
-                const protectedIndex = trimmedValue.lastIndexOf(protectedMain);
-                if (protectedIndex !== -1) {
-                  userCode = trimmedValue.substring(0, protectedIndex).trimEnd();
-                }
-
-                // Store the properly composed source containing both user code and protected harness
-                setCode(composeProtectedSource(activeDrill, userCode));
+                // Clean the input to remove any stray artifacts before storing
+                setCode(cleanCodeSnippet(userEditableValue));
               }}
               minHeight={210}
               maxHeight={440}
@@ -354,29 +292,17 @@ const CourseRunnerPage: React.FC = () => {
             />
           </div>
           <div className="mt-3 flex items-center gap-2">
-            <span className="text-[10px] text-[#62666f]">
-              AI tests are protected and run separately.
-            </span>
             <button
               type="button"
               onClick={() => void submitDrill()}
-              disabled={harnessLoading}
-              className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold disabled:cursor-wait disabled:opacity-50"
+              className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold"
             >
-              {harnessLoading ? 'Preparing tests...' : 'Run and grade drill'}
+              Run and grade drill
             </button>
           </div>
           <p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">
             {feedback}
           </p>
-          {activeDrill.protectedMain && (
-            <textarea
-              value={activeDrill.protectedMain}
-              readOnly
-              className="sr-only"
-              aria-label="Protected AI test harness"
-            />
-          )}
         </>
       ) : (
         <p className="text-xs text-[#8a8f98]">No drills available yet.</p>
