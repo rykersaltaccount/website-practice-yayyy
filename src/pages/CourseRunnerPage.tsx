@@ -107,6 +107,7 @@ const CourseRunnerPage: React.FC = () => {
   const [generationError, setGenerationError] = useState('');
   const generatedLessonKey = useRef<string | null>(null);
   const drillEditorRef = useRef<HTMLDivElement>(null);
+    const [showNextLessonPopup, setShowNextLessonPopup] = useState(false);
   const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
   const activeDrill: Drill | undefined = drills[drillIndex];
 
@@ -127,6 +128,23 @@ const CourseRunnerPage: React.FC = () => {
     const rawCode = activeDrill ? getStarterCode(activeDrill) : '';
     setCode(cleanCodeSnippet(rawCode));
   }, [activeDrill?.id]);
+
+  // Load saved solution from localStorage when drill changes
+  useEffect(() => {
+    if (activeDrill) {
+      const savedCode = localStorage.getItem(`codevault_solution_${courseId}_${lessonId}_${activeDrill.id}`);
+      if (savedCode) {
+        setCode(savedCode);
+      }
+    }
+  }, [activeDrill?.id, courseId, lessonId]);
+
+  // Save solution to localStorage whenever code changes
+  useEffect(() => {
+    if (activeDrill) {
+      localStorage.setItem(`codevault_solution_${courseId}_${lessonId}_${activeDrill.id}`, code);
+    }
+  }, [code, activeDrill?.id, courseId, lessonId]);
 
   
   useEffect(() => {
@@ -308,6 +326,33 @@ const CourseRunnerPage: React.FC = () => {
         </>
       ) : (
         <p className="text-xs text-[#8a8f98]">No drills available yet.</p>
+      )}
+
+      {/* Lesson completion popup - shows when both concept checks and all drills are finished */}
+      {lesson?.isCompleted &&
+       (lesson.conceptChecks?.length === 0 ||
+        completedChecks === (lesson.conceptChecks || []).length) && (
+        <div className="mt-6 w-full">
+          <div className="rounded-lg border border-[#10b981]/30 bg-[#10b981]/10 p-6 text-center">
+            <p className="mb-4 text-lg font-semibold text-[#6ee7b7]">
+              Lesson Complete! 🎉
+            </p>
+            <p className="mb-4 text-sm text-[#dedede]">
+              You've finished all concept checks and drills for this lesson.
+            </p>
+            <button
+              onClick={() => {
+                // Navigate to next lesson - this would be handled by course navigation
+                // For now, we'll just reset to allow continuing or let the UI handle it
+                // The lesson completion is already saved via saveLesson in submitDrill
+              }}
+              className="w-full bg-[#10b981]/20 hover:bg-[#10b981]/30 text-[#6ee7b7]
+                       px-4 py-2 rounded font-semibold transition-colors"
+            >
+              Next Lesson
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )}
