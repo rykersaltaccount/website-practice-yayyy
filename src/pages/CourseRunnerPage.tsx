@@ -189,71 +189,169 @@ const CourseRunnerPage: React.FC = () => {
 
   const submitDrill = async () => {
     if (!activeDrill) return;
-    setFeedback('Compiling and checking...');
-    let compilerPassed = true;
-    let compilerOutput = '';
-    try {
-      const response = await fetch('/api/compile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: composeProtectedSource(activeDrill, code), filename: 'course-drill.cpp' }) });
-      if (response.ok) {
-        const result = await response.json() as { ok?: boolean; output?: string };
-        compilerPassed = result.ok !== false;
-        compilerOutput = result.output || '';
-      } else {
+      setFeedback('Compiling and checking...');
+      let compilerPassed = true;
+      let compilerOutput = '';
+      try {
+        const response = await fetch('/api/compile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: composeProtectedSource(activeDrill, code), filename: 'course-drill.cpp' }) });
+        if (response.ok) {
+          const result = await response.json() as { ok?: boolean; output?: string };
+          compilerPassed = result.ok !== false;
+          compilerOutput = result.output || '';
+        } else {
+          compilerPassed = false;
+          compilerOutput = (await response.text()).slice(0, 2000);
+        }
+      } catch (error) {
         compilerPassed = false;
-        compilerOutput = (await response.text()).slice(0, 2000);
+        compilerOutput = error instanceof Error ? error.message : 'Compiler service unavailable.';
       }
-    } catch (error) {
-      compilerPassed = false;
-      compilerOutput = error instanceof Error ? error.message : 'Compiler service unavailable.';
-    }
-    if (!compilerPassed) {
-      setFeedback(`Compilation failed:\n${compilerOutput || 'The compiler rejected the submission.'}`);
-      return;
-    }
-    const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, composeProtectedSource(activeDrill, code), 'course-grading');
-    const passed = compilerPassed && (aiPassed ?? (code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token))));
-    if (passed) {
-      const finishedMessage = `Drill ${drillIndex + 1} Finished.`;
-      setFeedback(finishedMessage);
-      setCompletionNotice(finishedMessage);
-      if (drillIndex === drills.length - 1) saveLesson({ isCompleted: true, bestScore: Math.max(lesson.bestScore, 100) });
-      else setDrillIndex(index => index + 1);
-      setCode('');
-    } else {
-      setFeedback(aiPassed === null ? 'The solution compiled, but AI grading was unavailable. Check the grading provider and try again.' : 'The solution compiled but did not pass the hidden tests. Review the requirements and try again.');
-      addMistake({ description: `Failed course drill: ${activeDrill.title}`, example: code || 'No code submitted.', relatedConcept: '', relatedProblems: [], learningLog: 'Review the lesson and retry the drill.', reviewedRecently: false });
-    }
-  };
+      if (!compilerPassed) {
+        setFeedback(`Compilation failed:\n${compilerOutput || 'The compiler rejected the submission.'}`);
+        return;
+      }
+      const aiPassed = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens, hiddenTests: activeDrill.hiddenTests }, composeProtectedSource(activeDrill, code), 'course-grading');
+      const passed = compilerPassed && (aiPassed ?? (code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token))));
+      if (passed) {
+        const finishedMessage = `Drill ${drillIndex + 1} Finished.`;
+        setFeedback(finishedMessage);
+        setCompletionNotice(finishedMessage);
+        if (drillIndex === drills.length - 1) saveLesson({ isCompleted: true, bestScore: Math.max(lesson.bestScore, 100) });
+        else setDrillIndex(index => index + 1);
+        setCode('');
+      } else {
+        setFeedback(aiPassed === null ? 'The solution compiled, but AI grading was unavailable. Check the grading provider and try again.' : 'The solution compiled but did not pass the hidden tests. Review the requirements and try again.');
+        addMistake({ description: `Failed course drill: ${activeDrill.title}`, example: code || 'No code submitted.', relatedConcept: '', relatedProblems: [], learningLog: 'Review the lesson and retry the drill.', reviewedRecently: false });
+      }
+    };
 
-  return (
-    <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <Link to={`/courses/${course.id}`} className="text-xs text-[#8a8f98] hover:text-white">← {course.title}</Link>
-        <span className="text-[11px] text-[#10b981]">C++23 deep work session</span>
-      </div>
-      {isLoading ? (
-        <div className="linear-card p-10 text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-[#10b981]/30 border-t-[#10b981]" />
-          <p className="text-sm text-white">Generating lesson...</p>
-          <p className="mt-2 text-xs text-[#8a8f98]">{generationStage || 'The course models are preparing your reading and exercises.'}</p>
-          <div className="mx-auto mt-5 h-1 max-w-xs overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#10b981]" /></div>
+    return (
+      <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <Link to={`/courses/${course.id}`} className="text-xs text-[#8a8f98] hover:text-white">← {course.title}</Link>
+          <span className="text-[11px] text-[#10b981]">C++23 deep work session</span>
         </div>
+        {isLoading ? (
+          <div className="linear-card p-10 text-center">
+            <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-[#10b981]/30 border-t-[#10b981]" />
+            <p className="text-sm text-white">Generating lesson...</p>
+            <p className="mt-2 text-xs text-[#8a8f98]">{generationStage || 'The course models are preparing your reading and exercises.'}</p>
+            <div className="mx-auto mt-5 h-1 max-w-xs overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#10b981]" /></div>
+          </div>
+        ) : (
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
+            <article className="linear-card overflow-y-auto p-6">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#10b981]">Lesson</p>
+              <h1 className="mt-2 text-xl font-bold text-white">{lesson.title}</h1>
+              <p className="mt-2 text-xs text-[#8a8f98]">{lesson.overview}</p>
+              {generationError && <p className="mt-4 rounded-md border border-[#f43f5e]/30 bg-[#f43f5e]/10 p-3 text-xs leading-relaxed text-[#fda4af]">Lesson generation failed: {generationError}</p>}
+              {lesson.contentMarkdown ? <div className="mt-6"><LessonMarkdown content={lesson.contentMarkdown} /></div> : <p className="mt-6 text-sm text-[#dedede]">Lesson content is not available. Configure the Course Generation provider in AI settings.</p>}
+              <button type="button" onClick={() => addConcept({ name: lesson.title, description: lesson.overview || lesson.title, relatedProblems: [], relatedNotes: [], notes: lesson.contentMarkdown || '' })} className="mt-6 rounded-md border border-[#c084fc]/30 px-3 py-2 text-xs text-[#d8b4fe] hover:bg-[#c084fc]/10">Save lesson to Concepts</button>
+            </article>
+            <aside className="linear-card flex flex-col p-5">
+              <div className="flex gap-2 border-b border-white/[0.08] pb-3">
+                <button type="button" onClick={() => setActiveTab('checks')} className={`px-2 py-1 text-xs ${activeTab === 'checks' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>Concept Checks</button>
+                <button type="button" onClick={() => setActiveTab('drills')} className={`px-2 py-1 text-xs ${activeTab === 'drills' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>C++ Drills</button>
+              </div>
+                {activeTab === 'checks' ? (
+    <div className="mt-4 space-y-4">
+      <p className="text-xs text-[#8a8f98]">
+        {completedChecks}/{(lesson.conceptChecks || []).length} checks correct
+      </p>
+      {(lesson.conceptChecks || []).map(check => (
+        <div key={check.id} className="rounded-lg border border-white/[0.08] p-4">
+          <p className="text-sm font-semibold text-white">{check.question}</p>
+          <div className="mt-3 grid gap-2">
+            {check.options.map((option, index) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))}
+                className={`rounded-md border px-3 py-2 text-left text-xs ${
+                  checkAnswers[check.id] === index
+                    ? index === check.correctIndex
+                      ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]'
+                      : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]'
+                    : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          {checkAnswers[check.id] !== undefined && (
+            <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div className="mt-4 flex flex-col">
+      {activeDrill ? (
+        <>
+          <p className="text-xs font-semibold text-white">{activeDrill.title}</p>
+          <div className="mt-3 text-xs leading-6 text-[#b7bbc3]">
+            <LessonMarkdown content={activeDrill.instructions} />
+          </div>
+          {completionNotice && (
+            <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">
+              {completionNotice}
+            </p>
+          )}
+          {harnessLoading && (
+            <p className="mt-3 text-xs text-[#8a8f98]">Preparing private tests...</p>
+          )}
+          <div
+            ref={drillEditorRef}
+            className="mt-4 min-h-48 max-h-[420px] overflow-y-auto rounded-md border border-white/[0.12] bg-[#090b0f] text-xs shadow-inner focus-within:border-[#5e6ad2]"
+          >
+            <Editor
+              value={removeMainFunction(code)}
+              onValueChange={value => setCode(composeProtectedSource(activeDrill, value))}
+              highlight={highlightCpp}
+              padding={12}
+              textareaId={`${activeDrill.id}-code`}
+              textareaClassName="font-mono outline-none"
+              preClassName="font-mono"
+              style={{
+                minHeight: 192,
+                fontSize: 12,
+                lineHeight: 1.5,
+                fontFamily: 'var(--font-mono)',
+              }}
+              aria-label={`${activeDrill.title} editable C++ implementation`}
+            />
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-[10px] text-[#62666f]">
+              AI tests are protected and run separately.
+            </span>
+            <button
+              type="button"
+              onClick={() => void submitDrill()}
+              disabled={harnessLoading}
+              className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold disabled:cursor-wait disabled:opacity-50"
+            >
+              {harnessLoading ? 'Preparing tests...' : 'Run and grade drill'}
+            </button>
+          </div>
+          <p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">
+            {feedback}
+          </p>
+          {activeDrill.protectedMain && (
+            <textarea
+              value={activeDrill.protectedMain}
+              readOnly
+              className="sr-only"
+              aria-label="Protected AI test harness"
+            />
+          )}
+        </>
       ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
-          <article className="linear-card overflow-y-auto p-6">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#10b981]">Lesson</p>
-            <h1 className="mt-2 text-xl font-bold text-white">{lesson.title}</h1>
-            <p className="mt-2 text-xs text-[#8a8f98]">{lesson.overview}</p>
-            {generationError && <p className="mt-4 rounded-md border border-[#f43f5e]/30 bg-[#f43f5e]/10 p-3 text-xs leading-relaxed text-[#fda4af]">Lesson generation failed: {generationError}</p>}
-            {lesson.contentMarkdown ? <div className="mt-6"><LessonMarkdown content={lesson.contentMarkdown} /></div> : <p className="mt-6 text-sm text-[#dedede]">Lesson content is not available. Configure the Course Generation provider in AI settings.</p>}
-            <button type="button" onClick={() => addConcept({ name: lesson.title, description: lesson.overview || lesson.title, relatedProblems: [], relatedNotes: [], notes: lesson.contentMarkdown || '' })} className="mt-6 rounded-md border border-[#c084fc]/30 px-3 py-2 text-xs text-[#d8b4fe] hover:bg-[#c084fc]/10">Save lesson to Concepts</button>
-          </article>
-          <aside className="linear-card flex flex-col p-5">
-            <div className="flex gap-2 border-b border-white/[0.08] pb-3">
-              <button type="button" onClick={() => setActiveTab('checks')} className={`px-2 py-1 text-xs ${activeTab === 'checks' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>Concept Checks</button>
-              <button type="button" onClick={() => setActiveTab('drills')} className={`px-2 py-1 text-xs ${activeTab === 'drills' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>C++ Drills</button>
-            </div>
-            {activeTab === 'checks' ? <div className="mt-4 space-y-4"><p className="text-xs text-[#8a8f98]">{completedChecks}/{(lesson.conceptChecks || []).length} checks correct</p>{(lesson.conceptChecks || []).map(check => <div key={check.id} className="rounded-lg border border-white/[0.08] p-4"><p className="text-sm font-semibold text-white">{check.question}</p><div className="mt-3 grid gap-2">{check.options.map((option, index) => <button key={option} type="button" onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))} className={`rounded-md border px-3 py-2 text-left text-xs ${checkAnswers[check.id] === index ? (index === check.correctIndex ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]' : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]') : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'}`}>{option}</button>)}</div>{checkAnswers[check.id] !== undefined && <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>}</div>)}</div> : <div className="mt-4 flex flex-col">{activeDrill ? <><p className="text-xs font-semibold text-white">{activeDrill.title}</p><div className="mt-3 text-xs leading-6 text-[#b7bbc3]"><LessonMarkdown content={activeDrill.instructions} /></div>{completionNotice && <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">{completionNotice}</p>}{harnessLoading && <p className="mt-3 text-xs text-[#8a8f98]">Preparing private tests...</p>}<div ref={drillEditorRef} className="mt-4 min-h-48 max-h-[420px] overflow-y-auto rounded-md border border-white/[0.12] bg-[#090b0f] text-xs shadow-inner focus-within:border-[#5e6ad2]"><Editor value={removeMainFunction(code)} onValueChange={value => setCode(composeProtectedSource(activeDrill, value))} highlight={highlightCpp} padding={12} textareaId={`${activeDrill.id}-code`} textareaClassName="font-mono outline-none" preClassName="font-mono" style={{ minHeight: 192, fontSize: 12, lineHeight: 1.5, fontFamily: 'var(--font-mono)' }} aria-label={`${activeDrill.title} editable C++ implementation`} /></div><div className="mt-3 flex items-center gap-2"><span className="text-[10px] text-[#62666f]">AI tests are protected and run separately.</span><button type="button" onClick={() => void submitDrill()} disabled={harnessLoading} className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold disabled:cursor-wait disabled:opacity-50">{harnessLoading ? 'Preparing tests...' : 'Run and grade drill'}</button></div><p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">{feedback}</p>{activeDrill.protectedMain && <textarea value={activeDrill.protectedMain} readOnly className="sr-only" aria-label="Protected AI test harness" />}</> : <p className="text-xs text-[#8a8f98]">No drills available yet.</p>}</div>}
+        <p className="text-xs text-[#8a8f98]">No drills available yet.</p>
+      )}
+    </div>
+  )}
           </aside>
         </div>
       )}
