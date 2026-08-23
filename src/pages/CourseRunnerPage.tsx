@@ -31,7 +31,16 @@ const cleanCodeSnippet = (rawCode: string) => {
   if (!rawCode) return '';
   return rawCode
     .replace(/^```[a-z]*\s*\n?/i, '') // Removes leading ```cpp or ```
-    .replace(/\s*```\s*$/, '');        // Removes trailing ```
+    .replace(/\s*```\s*$/, '')        // Removes trailing ```
+    .split('\n')
+    // Filter out lines that are just a stray '#' or an isolated rogue 'i' on its own line
+    // Also filter out empty lines or lines with only whitespace that might be artifacts
+    .filter(line => {
+      const trimmed = line.trim();
+      // Keep the line if it's not just '#' or 'i' and not empty
+      return trimmed !== '#' && trimmed !== 'i' && trimmed.length > 0;
+    })
+    .join('\n');
 };
 
 const getStarterCode = (drill: Drill): string => {
@@ -315,17 +324,20 @@ const CourseRunnerPage: React.FC = () => {
             <CppPredictiveEditor
               id={`${activeDrill.id}-code`}
               value={activeDrill && activeDrill.protectedMain
-                ? removeMainFunction(code.substring(0, code.length - activeDrill.protectedMain.trim().length))
+                ? removeMainFunction(code.substring(0, code.length - (activeDrill.protectedMain.trim().length + 3)))
                 : removeMainFunction(code)}
               onChange={(userEditableValue) => {
                 // Protect the AI-generated test harness from user modifications
                 if (!activeDrill?.protectedMain) {
-                  setCode(userEditableValue);
+                  // Clean the input to remove any stray artifacts before storing
+                  setCode(cleanCodeSnippet(userEditableValue));
                   return;
                 }
 
+                // Clean the input to remove any stray artifacts
+                const cleanedInput = cleanCodeSnippet(userEditableValue);
                 const protectedMain = activeDrill.protectedMain.trim();
-                const trimmedValue = userEditableValue.trimEnd();
+                const trimmedValue = cleanedInput.trimEnd();
                 let userCode = trimmedValue;
 
                 // Ensure we strip out any accidental inclusion of the protected test harness
