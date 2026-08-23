@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import Prism from 'prismjs';
+import 'prismjs/components/prism-clike'; // Add this dependency explicitly
 import 'prismjs/components/prism-cpp';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
