@@ -39,6 +39,36 @@ npm run dev
 
 The application will be available at `http://localhost:5173`.
 
+### Cloud Course Sync
+
+Course sync uses the authenticated Supabase user. Run this once in the Supabase SQL editor before deploying:
+
+```sql
+create table if not exists public.courses (
+  id uuid primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.courses enable row level security;
+
+create policy "Users can read their courses"
+  on public.courses for select
+  using (auth.uid() = user_id);
+
+create policy "Users can create their courses"
+  on public.courses for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update their courses"
+  on public.courses for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+```
+
+The app keeps `localStorage` as an offline cache and uploads local-only courses when the user signs in.
+
 ### Building for Production
 
 To build the production version:

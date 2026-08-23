@@ -66,6 +66,12 @@ const deleteFromSupabase = async (collection: CollectionName, userId: string, id
   if (error) console.error(`Unable to delete ${collection.slice(0, -1)}:`, error);
 };
 
+const saveCourseToSupabase = async (userId: string, course: Course) => {
+  if (!supabase) return;
+  const { error } = await supabase.from('courses').upsert({ id: course.id, user_id: userId, data: course, updated_at: new Date().toISOString() });
+  if (error) console.error('Unable to save course:', error);
+};
+
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useContext(AuthContext)!;
   const [problems, setProblems] = useState<Problem[]>(() => {
@@ -174,6 +180,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         if (result.collection === 'concepts') setConcepts(items as Concept[]);
         if (result.collection === 'mistakes') setMistakes(items as Mistake[]);
       }
+
+      const { data: remoteCourses, error: courseError } = await supabase!.from('courses').select('id, data').eq('user_id', user.id);
+      if (courseError) {
+        console.error('Unable to load courses:', courseError);
+        return;
+      }
+      const localCourses = JSON.parse(localStorage.getItem('codevault-courses') || '[]') as Course[];
+      const remoteItems = (remoteCourses || []).map(row => ({ ...row.data, id: row.id } as Course));
+      const remoteIds = new Set(remoteItems.map(course => course.id));
+      const localOnlyCourses = localCourses.filter(course => !remoteIds.has(course.id));
+      if (localOnlyCourses.length > 0) await Promise.all(localOnlyCourses.map(course => saveCourseToSupabase(user.id, course)));
+      const mergedCourses = [...remoteItems, ...localOnlyCourses];
+      setCourses(mergedCourses);
+      localStorage.setItem('codevault-courses', JSON.stringify(mergedCourses));
     };
 
     void loadUserData();
@@ -245,8 +265,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setActiveCodingStartedAt(null);
   };
 
-  const addCourse = (course: Course) => setCourses(prev => [course, ...prev]);
-  const updateCourse = (id: string, updates: Partial<Course>) => setCourses(prev => prev.map(course => course.id === id ? { ...course, ...updates } : course));
+  const addCourse = (course: Course) => {
+    setCourses(prev => [course, ...prev]);
+    if (user) void saveCourseToSupabase(user.id, course);
+  };
+  const updateCourse = (id: string, updates: Partial<Course>) => setCourses(prev => {
+    const next = prev.map(course => course.id === id ? { ...course, ...updates } : course);
+    const updatedCourse = next.find(course => course.id === id);
+    if (user && updatedCourse) void saveCourseToSupabase(user.id, updatedCourse);
+    return next;
+  });
 
   // Problem functions
   const addProblem = (problem: Omit<Problem, 'id'>) => {
