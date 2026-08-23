@@ -1,7 +1,10 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
+import Editor from 'react-simple-code-editor';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-cpp';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
 import type { Lesson, Drill } from '../types/course';
@@ -39,6 +42,8 @@ int main() {
 }
 `;
 };
+
+const highlightCpp = (source: string) => Prism.highlight(source, Prism.languages.cpp, 'cpp');
 
 const removeMainFunction = (source: string): string => {
   const mainStart = source.search(/\b(?:int|auto)\s+main\s*\([^)]*\)\s*\{/);
@@ -103,7 +108,7 @@ const CourseRunnerPage: React.FC = () => {
   const [generationError, setGenerationError] = useState('');
   const [harnessLoading, setHarnessLoading] = useState(false);
   const generatedLessonKey = useRef<string | null>(null);
-  const drillEditorRef = useRef<HTMLTextAreaElement>(null);
+  const drillEditorRef = useRef<HTMLDivElement>(null);
   const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
   const activeDrill: Drill | undefined = drills[drillIndex];
 
@@ -113,7 +118,7 @@ const CourseRunnerPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const editor = drillEditorRef.current;
+    const editor = drillEditorRef.current?.querySelector('textarea');
     if (!editor) return;
     editor.style.height = 'auto';
     editor.style.height = `${Math.min(Math.max(editor.scrollHeight, 192), 420)}px`;
@@ -242,7 +247,7 @@ const CourseRunnerPage: React.FC = () => {
               <button type="button" onClick={() => setActiveTab('checks')} className={`px-2 py-1 text-xs ${activeTab === 'checks' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>Concept Checks</button>
               <button type="button" onClick={() => setActiveTab('drills')} className={`px-2 py-1 text-xs ${activeTab === 'drills' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>C++ Drills</button>
             </div>
-            {activeTab === 'checks' ? <div className="mt-4 space-y-4"><p className="text-xs text-[#8a8f98]">{completedChecks}/{(lesson.conceptChecks || []).length} checks correct</p>{(lesson.conceptChecks || []).map(check => <div key={check.id} className="rounded-lg border border-white/[0.08] p-4"><p className="text-sm font-semibold text-white">{check.question}</p><div className="mt-3 grid gap-2">{check.options.map((option, index) => <button key={option} type="button" onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))} className={`rounded-md border px-3 py-2 text-left text-xs ${checkAnswers[check.id] === index ? (index === check.correctIndex ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]' : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]') : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'}`}>{option}</button>)}</div>{checkAnswers[check.id] !== undefined && <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>}</div>)}</div> : <div className="mt-4 flex flex-col">{activeDrill ? <><p className="text-xs font-semibold text-white">{activeDrill.title}</p><div className="mt-3 text-xs leading-6 text-[#b7bbc3]"><LessonMarkdown content={activeDrill.instructions} /></div>{completionNotice && <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">{completionNotice}</p>}{harnessLoading && <p className="mt-3 text-xs text-[#8a8f98]">Preparing private tests...</p>}<textarea ref={drillEditorRef} value={removeMainFunction(code)} onChange={event => setCode(composeProtectedSource(activeDrill, event.target.value))} className="linear-input mt-4 min-h-48 max-h-[420px] resize-none overflow-y-auto p-3 font-mono text-xs" aria-label={`${activeDrill.title} editable C++ implementation`} /><div className="mt-3 flex items-center gap-2"><span className="text-[10px] text-[#62666f]">AI tests are protected and run separately.</span><button type="button" onClick={() => void submitDrill()} disabled={harnessLoading} className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold disabled:cursor-wait disabled:opacity-50">{harnessLoading ? 'Preparing tests...' : 'Run and grade drill'}</button></div><p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">{feedback}</p>{activeDrill.protectedMain && <textarea value={activeDrill.protectedMain} readOnly className="sr-only" aria-label="Protected AI test harness" />}</> : <p className="text-xs text-[#8a8f98]">No drills available yet.</p>}</div>}
+            {activeTab === 'checks' ? <div className="mt-4 space-y-4"><p className="text-xs text-[#8a8f98]">{completedChecks}/{(lesson.conceptChecks || []).length} checks correct</p>{(lesson.conceptChecks || []).map(check => <div key={check.id} className="rounded-lg border border-white/[0.08] p-4"><p className="text-sm font-semibold text-white">{check.question}</p><div className="mt-3 grid gap-2">{check.options.map((option, index) => <button key={option} type="button" onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))} className={`rounded-md border px-3 py-2 text-left text-xs ${checkAnswers[check.id] === index ? (index === check.correctIndex ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]' : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]') : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'}`}>{option}</button>)}</div>{checkAnswers[check.id] !== undefined && <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>}</div>)}</div> : <div className="mt-4 flex flex-col">{activeDrill ? <><p className="text-xs font-semibold text-white">{activeDrill.title}</p><div className="mt-3 text-xs leading-6 text-[#b7bbc3]"><LessonMarkdown content={activeDrill.instructions} /></div>{completionNotice && <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">{completionNotice}</p>}{harnessLoading && <p className="mt-3 text-xs text-[#8a8f98]">Preparing private tests...</p>}<div ref={drillEditorRef} className="mt-4 min-h-48 max-h-[420px] overflow-y-auto rounded-md border border-white/[0.12] bg-[#090b0f] text-xs shadow-inner focus-within:border-[#5e6ad2]"><Editor value={removeMainFunction(code)} onValueChange={value => setCode(composeProtectedSource(activeDrill, value))} highlight={highlightCpp} padding={12} textareaId={`${activeDrill.id}-code`} textareaClassName="font-mono outline-none" preClassName="font-mono" style={{ minHeight: 192, fontSize: 12, lineHeight: 1.5, fontFamily: 'var(--font-mono)' }} aria-label={`${activeDrill.title} editable C++ implementation`} /></div><div className="mt-3 flex items-center gap-2"><span className="text-[10px] text-[#62666f]">AI tests are protected and run separately.</span><button type="button" onClick={() => void submitDrill()} disabled={harnessLoading} className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold disabled:cursor-wait disabled:opacity-50">{harnessLoading ? 'Preparing tests...' : 'Run and grade drill'}</button></div><p className="mt-3 whitespace-pre-wrap break-words text-xs text-[#8a8f98]">{feedback}</p>{activeDrill.protectedMain && <textarea value={activeDrill.protectedMain} readOnly className="sr-only" aria-label="Protected AI test harness" />}</> : <p className="text-xs text-[#8a8f98]">No drills available yet.</p>}</div>}
           </aside>
         </div>
       )}

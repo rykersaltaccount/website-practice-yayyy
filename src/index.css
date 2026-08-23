@@ -47,6 +47,24 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata { color: #6b7280; }
+.token.keyword,
+.token.control,
+.token.directive { color: #c084fc; }
+.token.string,
+.token.char { color: #a7f3d0; }
+.token.number,
+.token.boolean { color: #fbbf24; }
+.token.function { color: #93c5fd; }
+.token.class-name,
+.token.namespace,
+.token.builtin { color: #67e8f9; }
+.token.operator,
+.token.punctuation { color: #cbd5e1; }
+
 body {
   margin: 0;
   background-color: #08090a;
