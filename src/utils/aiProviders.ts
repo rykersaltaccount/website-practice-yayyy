@@ -33,9 +33,9 @@ const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
 };
 
 const courseModels: Record<Extract<AiTask, `course-${string}`>, AiConfig> = {
-  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
-  'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
-  'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'nvidia/nemotron-3-nano-30b-a3b' },
+  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
+  'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
+  'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
 };
 
 const oldCourseModels = new Set(['meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1']);
