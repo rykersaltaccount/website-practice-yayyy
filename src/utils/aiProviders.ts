@@ -178,16 +178,6 @@ const extractJson = (text: string): unknown => {
   throw lastError instanceof Error ? lastError : new Error('AI returned invalid JSON.');
 };
 
-const uniqueConceptChecks = (checks: Lesson['conceptChecks']): Lesson['conceptChecks'] => {
-  if (!checks) return checks;
-  const seen = new Set<string>();
-  return checks.filter(check => {
-    const key = check.question.trim().toLowerCase().replace(/\s+/g, ' ');
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
 
 type GenerationProgress = (message: string) => void;
 
