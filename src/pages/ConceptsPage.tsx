@@ -427,7 +427,6 @@ Format your response as a structured list that I can use to create exercises.`;
                     onClick={() => {
                       navigator.clipboard.writeText(externalAIPrompt).then(() => {
                         // Show temporary feedback
-                        const originalText = document.querySelector('button[onclick*="copyText"]')?.textContent;
                         // In a real app, we'd use state to show this feedback
                         alert('Prompt copied to clipboard!');
                       });
