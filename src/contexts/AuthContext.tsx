@@ -69,7 +69,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             (userError.message && (
               userError.message.includes('could not find relation') ||
               userError.message.includes('does not exist') ||
-              userError.message.includes('not found')
+              userError.message.includes('not found') ||
+              userError.message.includes('schema cache')
             ))
           );
 
@@ -119,7 +120,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               (upsertError.message && (
                 upsertError.message.includes('could not find relation') ||
                 upsertError.message.includes('does not exist') ||
-                upsertError.message.includes('not found')
+                upsertError.message.includes('not found') ||
+                upsertError.message.includes('schema cache')
               ))
             );
 
@@ -178,7 +180,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             (error.message && (
               error.message.includes('could not find relation') ||
               error.message.includes('does not exist') ||
-              error.message.includes('not found')
+              error.message.includes('not found') ||
+              error.message.includes('schema cache')
             ))
           );
 
@@ -228,7 +231,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               (upsertError.message && (
                 upsertError.message.includes('could not find relation') ||
                 upsertError.message.includes('does not exist') ||
-                upsertError.message.includes('not found')
+                upsertError.message.includes('not found') ||
+                upsertError.message.includes('schema cache')
               ))
             );
 
