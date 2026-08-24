@@ -181,9 +181,10 @@ export const generateCourseLesson = async (
     });
 
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(`Provider request failed (response.status).{response.status}).response.status).{errorBody.slice(0, 200)}`);
+      throw new Error(`Provider request failed with status ${response.status}.`);
     }
+
+
 
     const data = await response.json();
     rawResponse = data.choices?.[0]?.message?.content ?? '';
