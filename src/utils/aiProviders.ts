@@ -41,7 +41,7 @@ const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
 };
 
 const courseModels: Partial<Record<AiTask, AiConfig>> = {
-  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
+  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'qwen/qwen2.5-coder-32b-instruct' },
   'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
   'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
 };
