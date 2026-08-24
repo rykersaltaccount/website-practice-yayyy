@@ -314,112 +314,77 @@ export const generateCourseSyllabus = async (
   return { ...result, id: crypto.randomUUID(), createdAt: new Date().toISOString(), overallProgress: 0 };
 };
 
+// Simple timeout wrapper for standard Promises
+const withTimeout = <T>(promise: Promise<T>, ms = 35000): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`AI generation timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
+};
+
 export const generateCourseLesson = async (
   course: Course,
   lessonTitle: string,
   onProgress?: GenerationProgress
 ): Promise<Lesson | null> => {
-  const prompt = `Generate an exceptional, highly engaging lesson on "${lessonTitle}" for the course "${course.title}" (${course.level} level).
-
-PEDAGOGICAL & WRITING STYLE (freeCodeCamp interactive tutorial style):
-- Write in a warm, conversational, encouraging mentor voice that talks directly to the learner ("you").
-- Break down complex C++23 mechanics into bite-sized, digestible steps. Never dump a wall of dense academic text.
-- For every code concept introduced, immediately show a clean code example, then walk through it line-by-line using phrases like "Notice how...", "Behind the scenes...", or "When this runs...".
-- Use clear markdown formatting, bullet points, bold text for key terms, and markdown blockquotes or code blocks to make the reading experience immersive and scannable.
-- Include ASCII memory diagrams or visual flow explanations where helpful for understanding pointers, references, memory layouts, or object lifetimes.
-
-Return ONLY valid JSON matching this schema:
-{
-  "overview": "1-2 sentence engaging overview",
-  "contentMarkdown": "Comprehensive, interactive tutorial (600-900 words) written in the freeCodeCamp pedagogical style described above, covering modern C++23 features, memory model, and best practices.",
-  "conceptChecks": [
-    {
-      "id": "cc-1",
-      "question": "Clear conceptual question testing a core misconception or rule...",
-      "options": ["A", "B", "C", "D"],
-      "correctIndex": 0,
-      "explanation": "Clear explanation of why this option is correct and why others fail."
-    }
-  ],
-  "drills": [
-    {
-      "id": "drill-1",
-      "title": "Drill title",
-      "instructions": "Clear, practical task instructions...",
-      "starterCode": "Complete, compilable C++23 starter program with necessary includes, class/struct definitions, TODO comments inside function/method bodies, and a clean main() function that demonstrates how to invoke the API with sample inputs without solving the core logic.",
-      "solution": "// Complete reference solution implementation",
-      "hints": ["Targeted hint 1"],
-      "gradingTokens": ["distinctiveToken1", "distinctiveToken2"],
-      "hiddenTests": ["Edge case test requirement 1", "Performance/correctness test requirement 2"]
-    }
-  ],
-  "capstone": {
-    "id": "capstone-1",
-    "title": "Capstone title",
-    "instructions": "Comprehensive task instructions bringing module concepts together...",
-    "starterCode": "Complete, compilable C++23 starter program with necessary includes, class/struct definitions, TODO comments inside function/method bodies, and a clean main() function demonstrating usage.",
-    "solution": "// Complete reference solution implementation",
-    "hints": ["Hint 1"],
-    "gradingTokens": ["token1"],
-    "hiddenTests": ["Comprehensive test case 1", "Comprehensive test case 2"]
-  }
-}
-
-CRITICAL RULES FOR DRILLS & CAPSTONE:
-- Every drill and the capstone must have starterCode that is a complete, compilable C++23 program.
-- The starterCode is a learner skeleton, not an answer: method/function bodies must contain only TODO comments and minimal compile-safe placeholders, with no completed algorithm or solution logic.
-- Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main().
-- Do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
-
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
-  const researchPrompt = `${prompt}\n\nUse this optional web research for factual accuracy only; do not copy it or include citations:\n${
-    webContext || 'No web research was available.'
-  }`;
+  const contextBlock = webContext ? `\n\nUse this optional web research for factual accuracy only:\n${webContext}` : '';
 
-  let result: Partial<Lesson> | null = null;
-  let lastError: unknown;
+  const readingPrompt = `Generate an engaging lesson tutorial on "${lessonTitle}" for "${course.title}" (${course.level} level).
+PEDAGOGICAL STYLE: Warm, direct, freeCodeCamp style with clear markdown, bullet points, and code walk-throughs.
+Return ONLY valid JSON matching:
+{
+  "overview": "1-2 sentence overview",
+  "contentMarkdown": "500-800 word Markdown tutorial covering C++23 concepts and code examples."
+}${contextBlock}`;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      if (attempt > 0) onProgress?.('The first lesson response was incomplete. Requesting a complete replacement...');
-      const instruction =
-        attempt === 0
-          ? researchPrompt
-          : `${researchPrompt}\n\nIMPORTANT REPAIR REQUEST: The previous response was incomplete or malformed. Generate the ENTIRE lesson again from the beginning. Do not omit overview, contentMarkdown, conceptChecks, drills, or capstone. Every drill and capstone must include complete starterCode, solution, hints, gradingTokens, and hiddenTests. Return one complete JSON object only.`;
+  const interactivePrompt = `Generate C++23 exercises for "${lessonTitle}" in "${course.title}".
+Return ONLY valid JSON matching:
+{
+  "conceptChecks": [{ "question": "...", "options": ["A","B","C","D"], "correctIndex": 0, "explanation": "..." }],
+  "drills": [{ "title": "...", "instructions": "...", "starterCode": "Complete compilable skeleton with main() and TODOs", "solution": "// solution", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": ["..."] }],
+  "capstone": { "title": "...", "instructions": "...", "starterCode": "...", "solution": "...", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": ["..."] }
+}${contextBlock}`;
 
-      const candidate = (await requestJson('course-lesson', instruction, 0.2, onProgress)) as Partial<Lesson> | null;
-      if (
-        candidate?.contentMarkdown &&
-        Array.isArray(candidate.conceptChecks) &&
-        Array.isArray(candidate.drills) &&
-        candidate.drills.length > 0 &&
-        candidate.capstone
-      ) {
-        result = candidate;
-        break;
-      }
-      lastError = new Error('The AI returned an incomplete lesson.');
-    } catch (error) {
-      lastError = error;
+  onProgress?.('Generating reading and interactive exercises in parallel...');
+
+  try {
+    // Run both AI requests simultaneously with exactly 4 arguments each
+    const [readingResponse, interactiveResponse] = await Promise.all([
+      withTimeout(requestJson('course-reading', readingPrompt, 0.2, onProgress), 35000),
+      withTimeout(requestJson('course-lesson', interactivePrompt, 0.2, onProgress), 35000)
+    ]) as [any, any];
+
+    if (!readingResponse?.contentMarkdown || !interactiveResponse?.drills) {
+      throw new Error('One or both AI passes returned incomplete payloads.');
     }
-  }
 
-  if (!result) {
-    if (lastError instanceof Error) throw lastError;
-    return null;
+    return {
+      id: crypto.randomUUID(),
+      title: lessonTitle,
+      isCompleted: false,
+      bestScore: 0,
+      overview: readingResponse.overview || '',
+      contentMarkdown: readingResponse.contentMarkdown || 'Content unavailable.',
+      conceptChecks: (interactiveResponse.conceptChecks || []).map((check: any) => ({
+        ...check,
+        id: crypto.randomUUID(),
+      })),
+      drills: (interactiveResponse.drills || []).map((drill: any) => ({
+        ...drill,
+        id: crypto.randomUUID(),
+      })),
+      capstone: interactiveResponse.capstone ? {
+        ...interactiveResponse.capstone,
+        id: crypto.randomUUID(),
+      } : undefined,
+    };
+  } catch (error) {
+    console.error('Parallel lesson generation failed:', error);
+    throw error;
   }
-
-  return {
-    id: crypto.randomUUID(),
-    title: lessonTitle,
-    isCompleted: false,
-    bestScore: 0,
-    overview: result.overview || '',
-    contentMarkdown: result.contentMarkdown || 'Content unavailable.',
-    conceptChecks: uniqueConceptChecks(result.conceptChecks || []),
-    drills: result.drills || [],
-    capstone: result.capstone,
-  };
 };
 
 export const generateDrillTestHarness = async (
