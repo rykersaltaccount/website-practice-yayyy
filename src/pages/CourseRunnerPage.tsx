@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Link, useParams } from 'react-router-dom';
 import AppContext from '../contexts/AppContext';
 import type { Lesson, Drill } from '../types/course';
-import { generateCourseLesson, gradeCodingExercise } from '../utils/aiProviders';
+import { generateCourseLesson } from '../utils/aiProviders';
 import { CppPredictiveEditor } from '../components/CppPredictiveEditor';
 
 const normalizeLesson = (lesson: Lesson): Lesson => {
@@ -187,30 +187,13 @@ const CourseRunnerPage: React.FC = () => {
 
   const submitDrill = async () => {
     if (!activeDrill) return;
-    setFeedback('Checking with AI...');
-    const aiResult = await gradeCodingExercise({ type: 'coding', level: 'Course drill', prompt: activeDrill.instructions, hint: '', acceptedAnswers: [], starterCode: getStarterCode(activeDrill), validationTokens: activeDrill.gradingTokens }, code, 'course-grading');
-      let passed: boolean;
-      let feedbackMessage: string;
-      if (aiResult === null) {
-        // Fallback validation when AI service unavailable
-        passed = code.trim().length > 30 && activeDrill.gradingTokens.every(token => code.includes(token));
-        feedbackMessage = passed ? 'Great job! Your solution passes basic validation.' : 'AI grading unavailable and solution did not pass basic validation. Review requirements and try again.';
-      } else {
-        passed = aiResult.passed;
-        feedbackMessage = aiResult.feedback ?? (passed ? 'Great job! Your solution passes all tests.' : 'Your solution needs improvement. Review the requirements and try again.');
-      }
-      if (passed) {
-        const finishedMessage = `Drill ${drillIndex + 1} Finished.`;
-        setFeedback(finishedMessage);
-        setCompletionNotice(finishedMessage);
-        if (drillIndex === drills.length - 1) saveLesson({ isCompleted: true, bestScore: Math.max(lesson.bestScore, 100) });
-        else setDrillIndex(index => index + 1);
-        setCode('');
-      } else {
-        setFeedback(feedbackMessage);
-        addMistake({ description: `Failed course drill: ${activeDrill.title}`, example: code || 'No code submitted.', relatedConcept: '', relatedProblems: [], learningLog: 'Review the lesson and retry the drill.', reviewedRecently: false });
-      }
-    };
+    setFeedback('Generating prompt for external AI...');
+    // Generate a prompt that the user can copy and paste into an external AI
+    const prompt = `Please review the following C++ code for the drill "${activeDrill.title}":\n\n${code}\n\nInstructions: ${activeDrill.instructions}\n\nPlease provide feedback on whether the code correctly solves the problem and any suggestions for improvement.`;
+    setExternalAIPrompt(prompt);
+    setShowExternalAIPrompt(true);
+    setFeedback('Prompt generated. Please use an external AI to check your code.');
+  };
 
     return (
       <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4">

@@ -2,7 +2,7 @@ import type { Concept } from '../types';
 import type { Course, Drill, Lesson } from '../types/course';
 import { jsonrepair } from 'jsonrepair';
 
-export type AiTask = 'practice' | 'test' | 'helper' | 'course' | 'course-syllabus' | 'course-lesson' | 'course-reading' | 'course-grading';
+export type AiTask = 'helper' | 'course' | 'course-syllabus' | 'course-lesson' | 'course-reading';
 export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
 
 export interface AiConfig {
@@ -36,7 +36,6 @@ const courseModels: Record<Extract<AiTask, `course-${string}`>, AiConfig> = {
   'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
   'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
   'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'nvidia/nemotron-3-nano-30b-a3b' },
-  'course-grading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
 };
 
 const oldCourseModels = new Set(['meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1']);
@@ -171,57 +170,6 @@ const uniqueConceptChecks = (checks: Lesson['conceptChecks']): Lesson['conceptCh
   });
 };
 
-export const generateExercises = async (
-  conceptsInput: Concept | Concept[],
-  task: 'practice' | 'test',
-  difficulty?: string,
-  mode: 'combined' | 'isolated' = 'combined',
-): Promise<GeneratedExercise[] | null> => {
-  const concepts = Array.isArray(conceptsInput) ? conceptsInput.slice(0, 3) : [conceptsInput];
-  const conceptSummary = concepts.map(concept => `- ${concept.name}: ${concept.description}. Time complexity: ${concept.timeComplexity || 'unknown'}`).join('\n');
-  const conceptNames = concepts.map(concept => concept.name).join(' + ');
-  const config = getAiConfig(task);
-  if (!config.apiKey.trim() && config.provider !== 'ollama') return null;
-  if (!config.endpoint.trim() || !config.model.trim()) return null;
-
-  const instruction = `Generate exactly ${task === 'test' ? 5 : 3} ORIGINAL programming exercises for ${conceptNames}. ${mode === 'combined' && concepts.length > 1 ? `Combine the concepts in every exercise where practical. Force the learner to recognize which concept applies first, how the concepts interact, and the trade-offs between them.` : 'Keep the exercises isolated to the individual concept and do not require knowledge of the other concepts.'} ${difficulty ? `Difficulty: ${difficulty}.` : 'Progress from foundational to advanced.'} Concept context:\n${conceptSummary}\nMix conceptual questions and C++ coding problems; at least one exercise must have type "coding". Every coding task must require a self-contained C++23 solution with a clear function or main-program requirement, starterCode, and validationTokens containing 2-5 distinctive implementation tokens. Do not reproduce, paraphrase, or reference any known LeetCode, HackerRank, Codewars, interview, textbook, or common online exercise. Invent a novel scenario specific to this concept combination. Return ONLY valid JSON: {"exercises":[{"type":"question|coding","level":"...","prompt":"...","hint":"...","acceptedAnswers":["keyword1"],"starterCode":"...","validationTokens":["functionName","distinctiveToken"]}]}. For coding items, acceptedAnswers may be empty.`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  let url = config.endpoint;
-  let body: string;
-
-  if (config.provider === 'gemini') {
-    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
-    body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature: 0.3, responseMimeType: 'application/json' } });
-  } else {
-    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-    body = JSON.stringify({ model: config.model, temperature: 0.3, messages: [{ role: 'system', content: 'You generate rigorous programming assessments.' }, { role: 'user', content: instruction }] });
-  }
-
-  try {
-    let response: Response;
-    try {
-      response = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
-        });
-    } catch {
-      throw new Error('Could not reach the CodeVault AI proxy. Start npm run dev:compiler locally or redeploy Vercel so /api/ai is available.');
-    }
-    if (!response.ok) throw new Error(`AI provider returned HTTP ${response.status}`);
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const text = config.provider === 'gemini'
-      ? data.candidates?.[0]?.content?.parts?.[0]?.text
-      : data.choices?.[0]?.message?.content;
-    if (!text) throw new Error('AI provider returned no exercise content');
-    const parsed = extractJson(text) as { exercises?: GeneratedExercise[] };
-    return parsed.exercises?.filter(exercise => exercise.prompt && (exercise.type === 'coding' || exercise.acceptedAnswers?.length)) || null;
-  } catch (error) {
-    console.warn('AI exercise generation failed; using local exercises.', error);
-    return null;
-  }
-};
-
 type GenerationProgress = (message: string) => void;
 
 export const getWebContext = async (query: string): Promise<string> => {
@@ -272,7 +220,7 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
       throw new Error(`${config.provider} returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
     }
     onProgress?.('Response received. Parsing structured output...');
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }> } };
     const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
     return text ? extractJson(text) : null;
   } catch (error) {
@@ -343,9 +291,9 @@ Return ONLY valid JSON matching this schema:
 }
 
 CRITICAL RULES FOR DRILLS & CAPSTONE:
-- Every drill and the capstone must have starterCode that is a complete, compilable C++23 program. 
-- The starterCode is a learner skeleton, not an answer: method/function bodies must contain only TODO comments and minimal compile-safe placeholders, with no completed algorithm or solution logic. 
-- Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main(). 
+- Every drill and the capstone must have starterCode that is a complete, compilable C++23 program.
+- The starterCode is a learner skeleton, not an answer: method/function bodies must contain only TODO comments and minimal compile-safe placeholders, with no completed algorithm or solution logic.
+- Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main().
 - Do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
 
   // Execute a SINGLE call instead of chaining multiple calls
@@ -410,25 +358,25 @@ mainCode must be a complete int main() function containing exactly 10 independen
 export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<{ passed: boolean; feedback: string } | null> => {
   const config = getAiConfig(task);
   if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
-  
+
   const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON with two fields: "passed" (boolean) and "feedback" (string).
 
-If the solution is CORRECT:
-- Set "passed": true
-- Provide encouraging feedback that confirms what was done well and suggests next steps or related concepts to explore
+  If the solution is CORRECT:
+  - Set "passed": true
+  - Provide encouraging feedback that confirms what was done well and suggests next steps or related concepts to explore
 
-If the solution is INCORRECT:
-- Set "passed": false
-- Provide SPECIFIC, STEP-BY-STEP guidance on exactly what needs to be fixed
-- Include the EXACT architecture or code structure that should be implemented
-- Mention specific lines or sections that need modification
-- Reference the exercise requirements: ${exercise.prompt}
-- Consider the rubric tokens: ${(exercise.validationTokens || []).join(', ')}
-- Do NOT reveal hidden tests, but DO explain what concepts or techniques are missing
-- Format feedback as clear, numbered steps when multiple issues exist
+  If the solution is INCORRECT:
+  - Set "passed": false
+  - Provide SPECIFIC, STEP-BY-STEP guidance on exactly what needs to be fixed
+  - Include the EXACT architecture or code structure that should be implemented
+  - Mention specific lines or sections that need modification
+  - Reference the exercise requirements: ${exercise.prompt}
+  - Consider the rubric tokens: ${(exercise.validationTokens || []).join(', ')}
+  - Do NOT reveal hidden tests, but DO explain what concepts or techniques are missing
+  - Format feedback as clear, numbered steps when multiple issues exist
 
-Exercise: ${exercise.prompt}
-Submitted C++23 code:\n${answer}`;
+  Exercise: ${exercise.prompt}
+  Submitted C++23 code:\n${answer}`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let url = config.endpoint;
   let body: string;
@@ -446,7 +394,7 @@ Submitted C++23 code:\n${answer}`;
       body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
     });
     if (!response.ok) return null;
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }> } };
     const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
     if (!text) return null;
     const result = extractJson(text) as { passed?: boolean; feedback?: string };

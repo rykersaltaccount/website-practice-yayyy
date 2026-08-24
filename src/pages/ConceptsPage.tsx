@@ -2,7 +2,8 @@ import React, { useState, useContext } from 'react';
 import AppContext from '../contexts/AppContext';
 import type { Concept } from '../types';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { generateExercises, gradeCodingExercise } from '../utils/aiProviders';
+
+// Removed generateExercises and gradeCodingExercise as they are no longer used
 
 const CONCEPT_NOTE_TEMPLATE = `What is it?
 
@@ -93,6 +94,10 @@ const ConceptsPage: React.FC = () => {
   const [isChecking, setIsChecking] = useState(false);
   const [codeAnswer, setCodeAnswer] = useState('');
   const [assessmentTask, setAssessmentTask] = useState<'practice' | 'test'>('test');
+  // Manual workflow state for external AI checking
+  const [externalAIPrompt, setExternalAIPrompt] = useState('');
+  const [showExternalAIPrompt, setShowExternalAIPrompt] = useState(false);
+  const [selectedConceptForPrompt, setSelectedConceptForPrompt] = useState<Concept | null>(null);
 
   const getRelatedProblems = (conceptId: string) => {
     const concept = concepts.find(c => c.id === conceptId);
@@ -118,49 +123,85 @@ const ConceptsPage: React.FC = () => {
 
   const selectedConcept = concepts.find(concept => concept.id === selectedConceptId);
 
+  // Updated to generate prompt for external AI instead of calling generateExercises
   const startConceptTest = async (concept: Concept) => {
     setIsGenerating(true);
     setAssessmentTask('test');
-    const generated = await generateExercises(concept, 'test', undefined, 'isolated');
-    setTestConcept(concept);
-    setTestExercises(generated || buildExercises(concept));
-    setTestIndex(0);
-    setTestAnswer('');
-    setCodeAnswer(generated?.[0]?.type === 'coding' ? generated[0].starterCode || '' : '');
-    setTestResult('idle');
+    // Generate a prompt for external AI to create exercises for this concept
+    const prompt = `Please create a progressive test for the programming concept "${concept.name}".
+Concept description: ${concept.description || 'No description provided'}
+
+Please generate 5 exercises that test understanding of this concept:
+1. A foundational question about what problem this concept solves
+2. A question about the core mechanism or invariant
+3. A coding exercise in C++23
+4. A question about time/space complexity
+5. An advanced synthesis question about trade-offs or edge cases
+
+For each exercise, provide:
+- The exercise prompt/question
+- Any hints for solving it
+- For coding exercises: starter code and validation tokens to look for
+- For concept questions: example accepted answers
+
+Format your response as a structured list that I can use to create exercises.`;
+
+    setExternalAIPrompt(prompt);
+    setSelectedConceptForPrompt(concept);
+    setShowExternalAIPrompt(true);
     setIsGenerating(false);
   };
 
+  // Updated to generate prompt for external AI instead of calling generateExercises
   const startPractice = async () => {
     if (!practiceConcept) return;
     setIsGenerating(true);
     setAssessmentTask('practice');
-    const concept = practiceConcept;
-    const generated = await generateExercises(concept, 'practice', practiceDifficulty, 'isolated');
-    setTestConcept(concept);
-    setTestExercises(generated || buildExercises(concept, practiceDifficulty));
-    setTestIndex(0);
-    setTestAnswer('');
-    setCodeAnswer(generated?.[0]?.type === 'coding' ? generated[0].starterCode || '' : '');
-    setTestResult('idle');
-    setPracticeConcept(null);
+    // Generate a prompt for external AI to create practice exercises for this concept
+    const prompt = `Please create practice exercises for the programming concept "${practiceConcept.name}" at ${practiceDifficulty} difficulty level.
+Concept description: ${practiceConcept.description || 'No description provided'}
+
+Please generate exercises appropriate for ${practiceDifficulty} difficulty that help practice this concept. Include:
+- Concept questions about the purpose and mechanics
+- At least one coding exercise in C++23 if appropriate
+- Questions about complexity if relevant
+- Synthesis/application questions
+
+For each exercise, provide:
+- The exercise prompt/question
+- Any hints for solving it
+- For coding exercises: starter code and validation tokens to look for
+- For concept questions: example accepted answers
+
+Format your response as a structured list that I can use to create exercises.`;
+
+    setExternalAIPrompt(prompt);
+    setSelectedConceptForPrompt(practiceConcept);
+    setShowExternalAIPrompt(true);
     setIsGenerating(false);
+    setPracticeConcept(null); // Clear the practice concept since we're showing the prompt
   };
 
   const closeConceptTest = () => {
     setTestConcept(null);
     setTestAnswer('');
     setTestResult('idle');
+    setExternalAIPrompt('');
+    setShowExternalAIPrompt(false);
+    setSelectedConceptForPrompt(null);
   };
 
+  // Updated to manually mark concept as mastered instead of calling gradeCodingExercise
   const submitExercise = async () => {
     const exercise = testExercises[testIndex];
     const answer = (exercise.type === 'coding' ? codeAnswer : testAnswer).trim().toLowerCase();
     setIsChecking(true);
-    const aiGrade = exercise.type === 'coding' ? await gradeCodingExercise(exercise, codeAnswer, assessmentTask) : null;
-    const passed = exercise.type === 'coding'
-      ? (aiGrade ?? (codeAnswer.trim().length >= 30 && (exercise.validationTokens || []).every(token => codeAnswer.toLowerCase().includes(token.toLowerCase()))))
-      : answer.length >= 12 && exercise.acceptedAnswers.some(keyword => answer.includes(keyword));
+
+    // Since we removed automatic grading, we'll simulate a simple check
+    // In a real implementation, the user would check with external AI and then manually mark as passed/failed
+    // For now, we'll just allow the user to proceed based on their own judgment
+    const passed = confirm(`Did you check your answer with an external AI and believe it's correct?\n\nExercise: ${exercise.prompt}\n\nYour answer: ${answer}`);
+
     setIsChecking(false);
     if (!passed || !testConcept) {
       if (testConcept) {
@@ -196,6 +237,17 @@ const ConceptsPage: React.FC = () => {
       notes: String(form.get('notes') || ''),
     });
     setSelectedConceptId(null);
+  };
+
+  // New function to manually mark a concept as mastered after external AI check
+  const markConceptAsMastered = () => {
+    if (!selectedConceptForPrompt) return;
+    updateConcept(selectedConceptForPrompt.id, {
+      mastery: { mastered: true, masteredAt: new Date().toISOString() },
+    });
+    setShowExternalAIPrompt(false);
+    setSelectedConceptForPrompt(null);
+    setExternalAIPrompt('');
   };
 
   return (
@@ -384,6 +436,65 @@ const ConceptsPage: React.FC = () => {
             setSelectedConceptId(null);
           }}
         />
+      )}
+
+      {/* External AI Prompt Modal */}
+      {showExternalAIPrompt && selectedConceptForPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+          <div className="w-full max-w-2xl rounded-xl border border-white/[0.12] bg-[#0c0d12] p-6 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-white/[0.08] pb-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#c084fc]">External AI Prompt</p>
+                <h2 className="mt-1 text-lg font-bold text-white">Generate exercises for {selectedConceptForPrompt.name}</h2>
+                <p className="mt-1 text-xs text-[#8a8f98]">Copy this prompt and use it with an external AI to generate exercises</p>
+              </div>
+              <button type="button" onClick={closeConceptTest} className="text-[#8a8f98] hover:text-white" aria-label="Close">✕</button>
+            </div>
+
+            <div className="space-y-5 pt-5">
+              <div>
+                <p className="mb-2 text-[11px] text-[#8a8f98]">Copy the prompt below and paste it into your preferred external AI (ChatGPT, Claude, etc.) to generate exercises for this concept:</p>
+                <div className="mt-3">
+                  <textarea
+                    value={externalAIPrompt}
+                    onChange={e => setExternalAIPrompt(e.target.value)}
+                    rows={12}
+                    className="linear-input w-full resize-y p-3 font-mono text-xs leading-relaxed bg-[#08090a] text-[#dedede] readonly"
+                    readOnly
+                    aria-label="External AI prompt for concept exercises"
+                  />
+                </div>
+                <div className="mt-4 flex justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(externalAIPrompt).then(() => {
+                        // Show temporary feedback
+                        const originalText = document.querySelector('button[onclick*="copyText"]')?.textContent;
+                        // In a real app, we'd use state to show this feedback
+                        alert('Prompt copied to clipboard!');
+                      });
+                    }}
+                    className="rounded-md border border-white/[0.1] px-4 py-2 text-xs text-[#8a8f98] hover:text-white"
+                  >
+                    Copy Prompt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={markConceptAsMastered}
+                    className="linear-btn-primary px-4 py-2 text-xs font-semibold"
+                  >
+                    I've checked with external AI - Mark as Mastered
+                  </button>
+                </div>
+                <p className="mt-3 text-xs text-[#8a8f98]">
+                  After generating exercises with the external AI and verifying they test your understanding properly,
+                  click "I've checked with external AI - Mark as Mastered" to indicate you've mastered this concept.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {testConcept && (

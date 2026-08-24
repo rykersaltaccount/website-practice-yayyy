@@ -5,18 +5,15 @@ const providerLabels: Record<AiProvider, string> = {
   nim: 'NVIDIA NIM', ollama: 'Ollama', chatgpt: 'ChatGPT / OpenAI', gemini: 'Gemini', grok: 'Grok / xAI', custom: 'Custom OpenAI-compatible',
 };
 const tasks: Array<{ id: AiTask; label: string; description: string }> = [
-  { id: 'practice', label: 'Practice exercises', description: 'Short targeted drills at your chosen difficulty.' },
-  { id: 'test', label: 'Mastery tests', description: 'Five-level assessments that can mark a concept mastered.' },
   { id: 'helper', label: 'AI Helper', description: 'Workspace analysis, advice, and issue creation.' },
   { id: 'course-syllabus', label: 'Course syllabus', description: 'Fast module and lesson planning with Llama 3.1 8B.' },
   { id: 'course-lesson', label: 'Lesson structure', description: 'C++23 reasoning, checks, drills, and capstones.' },
   { id: 'course-reading', label: 'Long-form readings', description: '1,000+ word technical readings with Nemotron-3.' },
-  { id: 'course-grading', label: 'Course grading', description: 'Fast drill grading with Llama 3.1 8B.' },
 ];
 
 const AiSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const [task, setTask] = useState<AiTask>('practice');
-  const [config, setConfig] = useState<AiConfig>(() => getAiConfig('practice'));
+  const [task, setTask] = useState<AiTask>('helper');
+  const [config, setConfig] = useState<AiConfig>(() => getAiConfig('helper'));
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState('');
