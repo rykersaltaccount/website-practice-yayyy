@@ -304,7 +304,7 @@ export const generateCourseSyllabus = async (
   return { ...result, id: crypto.randomUUID(), createdAt: new Date().toISOString(), overallProgress: 0 };
 };
 
-// Simple timeout wrapper for standard Promises
+// Timeout wrapper to prevent hanging requests
 const withTimeout = <T>(promise: Promise<T>, ms = 35000): Promise<T> => {
   return Promise.race([
     promise,
@@ -319,31 +319,41 @@ export const generateCourseLesson = async (
   lessonTitle: string,
   onProgress?: GenerationProgress
 ): Promise<Lesson | null> => {
+  const jsonFormattingRules = `
+CRITICAL JSON FORMATTING REQUIREMENTS:
+- Return ONLY valid raw JSON with double-quoted keys (e.g., "overview": "value").
+- Do NOT wrap response in markdown code blocks like \`\`\`json.
+- Properly escape all double quotes inside code snippets using backslashes (e.g. \\"Hello World\\").
+- Do NOT include raw line breaks inside string values. Use \\n instead.`;
+
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
   const contextBlock = webContext ? `\n\nUse this optional web research for factual accuracy only:\n${webContext}` : '';
 
   const readingPrompt = `Generate an engaging lesson tutorial on "${lessonTitle}" for "${course.title}" (${course.level} level).
-PEDAGOGICAL STYLE: Warm, direct, freeCodeCamp style with clear markdown, bullet points, and code walk-throughs.
-STRICT RULE: Do NOT use raw single backslashes in JSON strings. Double escape all backslashes (e.g., use \\\\n or \\\\t).
-Return ONLY valid JSON matching:
+PEDAGOGICAL STYLE: Warm, direct, freeCodeCamp style with clear markdown and code walk-throughs.
+
+Schema:
 {
   "overview": "1-2 sentence overview",
-  "contentMarkdown": "500-800 word Markdown tutorial covering C++23 concepts and code examples."
-}${contextBlock}`;
+  "contentMarkdown": "500-800 word Markdown tutorial covering C++23 concepts."
+}
+${jsonFormattingRules}
+${contextBlock}`;
 
   const interactivePrompt = `Generate C++23 exercises for "${lessonTitle}" in "${course.title}".
-STRICT RULE: Do NOT use raw single backslashes in JSON strings. Double escape all backslashes.
-Return ONLY valid JSON matching:
+
+Schema:
 {
   "conceptChecks": [{ "question": "...", "options": ["A","B","C","D"], "correctIndex": 0, "explanation": "..." }],
-  "drills": [{ "title": "...", "instructions": "...", "starterCode": "Complete compilable skeleton with main() and TODOs", "solution": "// solution", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": ["..."] }],
+  "drills": [{ "title": "...", "instructions": "...", "starterCode": "Complete compilable skeleton", "solution": "// solution", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": ["..."] }],
   "capstone": { "title": "...", "instructions": "...", "starterCode": "...", "solution": "...", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": ["..."] }
-}${contextBlock}`;
+}
+${jsonFormattingRules}
+${contextBlock}`;
 
   onProgress?.('Generating reading and interactive exercises in parallel...');
 
   try {
-    // Run both AI requests simultaneously
     const [readingResponse, interactiveResponse] = await Promise.all([
       withTimeout(requestJson('course-reading', readingPrompt, 0.2, onProgress), 35000),
       withTimeout(requestJson('course-lesson', interactivePrompt, 0.2, onProgress), 35000)
@@ -376,28 +386,6 @@ Return ONLY valid JSON matching:
   } catch (error) {
     console.error('Parallel lesson generation failed:', error);
     throw error;
-  }
-};
-
-export const generateDrillTestHarness = async (
-  drill: Pick<Drill, 'title' | 'instructions' | 'starterCode' | 'solution' | 'hiddenTests'>
-): Promise<string | null> => {
-  const prompt = `Create a robust, production-grade C++23 test harness for this coding drill.
-Title: ${drill.title}
-Requirements: ${drill.instructions}
-Starter context: ${drill.starterCode}
-Reference solution (use only to design rigorous tests): ${drill.solution}
-Private test ideas: ${(drill.hiddenTests || []).join(' | ')}
-
-Return ONLY valid JSON in this exact shape: {"mainCode":"..."}.
-mainCode must be a complete int main() function containing exactly 10 independent, thorough test cases covering edge cases, standard use cases, performance constraints, and error handling. Label each test clearly with a comment exactly like // TEST 1 through // TEST 10. Use assert statements or explicit validation checks with descriptive failure messages, and return a non-zero exit code if any test fails. The harness must call the learner's implemented functions/classes cleanly.`;
-
-  try {
-    const result = (await requestJson('course-grading', prompt, 0)) as { mainCode?: string } | null;
-    const testLabels = result?.mainCode?.match(/\/\/\s*TEST\s+(?:[1-9]|10)\b/gi) || [];
-    return result?.mainCode && /\bmain\s*\(/.test(result.mainCode) && testLabels.length === 10 ? result.mainCode : null;
-  } catch {
-    return null;
   }
 };
 
