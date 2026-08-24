@@ -168,10 +168,14 @@ const extractJson = (text: string): unknown => {
     cleaned = cleaned.slice(firstObject, lastObject + 1);
   }
 
+  let originalError: unknown;
+
   // Attempt 1: Direct standard parse
   try {
     return JSON.parse(cleaned);
-  } catch {}
+  } catch (e) {
+    originalError = e;
+  }
 
   // Attempt 2: Standard jsonrepair
   try {
@@ -185,10 +189,11 @@ const extractJson = (text: string): unknown => {
       .replace(/\t/g, '\\t');
     return JSON.parse(jsonrepair(sanitized));
   } catch (error) {
-    throw error instanceof Error ? error : new Error('AI returned invalid JSON structure.');
+    // Pass the actual parse error message up so the AI knows EXACTLY what to fix
+    const finalError = error instanceof Error ? error : (originalError instanceof Error ? originalError : new Error('Invalid JSON structure.'));
+    throw finalError;
   }
 };
-
 
 type GenerationProgress = (message: string) => void;
 
