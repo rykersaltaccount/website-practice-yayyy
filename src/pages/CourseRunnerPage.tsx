@@ -1,312 +1,227 @@
-// Replace your CourseRunnerPage.tsx with this fixed version:
+// utils/aiProviders.ts
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import remarkGfm from 'remark-gfm';
-import { Link, useParams } from 'react-router-dom';
-import AppContext from '../contexts/AppContext';
-import type { Lesson, Drill } from '../types/course';
-import { generateCourseLesson } from '../utils/aiProviders';
-import { CppPredictiveEditor } from '../components/CppPredictiveEditor';
+import type { Course} from '../types/course';
 
-const normalizeLesson = (lesson: Lesson): Lesson => {
-  const seen = new Set<string>();
-  return {
-    ...lesson,
-    conceptChecks: (lesson.conceptChecks || []).filter(check => {
-      const key = check.question.trim().toLowerCase().replace(/\s+/g, ' ');
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-    drills: (lesson.drills || []).map(drill => ({
-      ...drill,
-      gradingTokens: drill.gradingTokens || [],
-      hints: drill.hints || [],
-      hiddenTests: drill.hiddenTests || [],
-    })),
-  };
-};
+export type GenerationStageUpdater = (stage: string) => void;
 
-const cleanCodeSnippet = (rawCode: string) => {
-  if (!rawCode) return '';
-  return rawCode
-    .replace(/^```[a-z]*\s*\n?/i, '')
-    .replace(/\s*```\s*$/, '')
-    .split('\n')
-    .filter(line => line.trim() !== '#')
-    .join('\n');
-};
+/* ------------------------------------------------------------------ */
+/*  Robust JSON extraction                                             */
+/* ------------------------------------------------------------------ */
 
-const getStarterCode = (drill: Drill): string => {
-  const starterCode = drill.starterCode?.trim() || '';
-  const looksLikeSkeleton = /TODO|IMPLEMENT|YOUR CODE/i.test(starterCode)
-    && !/for\s*\(|while\s*\(|std::(sort|unordered_map|map|vector)|\bnew\s+|return\s+(?!0\s*;|nullptr\s*;|false\s*;)[^;]+;/.test(starterCode);
-  if (starterCode && looksLikeSkeleton && /#include|\b(class|struct|int\s+main|void\s+\w+|auto\s+\w+)\b/.test(starterCode)) {
-    return /\bmain\s*\(/.test(starterCode) ? drill.starterCode : `${drill.starterCode.trim()}\n\nint main() {\n    return 0;\n}\n`;
+const extractJson = <T,>(rawText: string): T => {
+  if (!rawText || !rawText.trim()) {
+    throw new Error('The AI returned an empty response.');
   }
-  return `#include <iostream>
-#include <string>
-#include <vector>
 
-// ${drill.title}
-// TODO: Implement the required behavior described above.
+  // 1. Try the whole string as-is
+  try {
+    return JSON.parse(rawText.trim()) as T;
+  } catch {
+    /* fall through */
+  }
 
-int main() {
-  return 0;
-}
-`;
-};
-
-const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    rehypePlugins={[rehypeHighlight]}
-    components={{
-      h1: ({ children }) => <h2 className="mt-6 text-lg font-bold text-white first:mt-0">{children}</h2>,
-      h2: ({ children }) => <h3 className="mt-6 text-base font-semibold text-white first:mt-0">{children}</h3>,
-      h3: ({ children }) => <h4 className="mt-5 text-sm font-semibold text-[#d8b4fe] first:mt-0">{children}</h4>,
-      p: ({ children }) => <p className="mt-3 text-sm leading-7 text-[#dedede] first:mt-0">{children}</p>,
-      ul: ({ children }) => <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[#dedede]">{children}</ul>,
-      ol: ({ children }) => <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-7 text-[#dedede]">{children}</ol>,
-      li: ({ children }) => <li>{children}</li>,
-      blockquote: ({ children }) => <blockquote className="mt-4 border-l-2 border-[#10b981]/60 pl-4 text-sm italic text-[#a7f3d0]">{children}</blockquote>,
-      code: ({ className, children, ...props }) => {
-        const isBlock = Boolean(className);
-        return isBlock ? <code className={className} {...props}>{children}</code> : <code className="rounded bg-[#242832] px-1.5 py-0.5 font-mono text-[0.85em] text-[#a7f3d0]" {...props}>{children}</code>;
-      },
-      pre: ({ children }) => <pre className="mt-4 overflow-x-auto rounded-lg border border-white/[0.1] bg-[#090b0f] p-4 text-xs leading-6 shadow-inner">{children}</pre>,
-      hr: () => <hr className="my-6 border-white/[0.1]" />,
-      a: ({ children, href }) => <a href={href} className="text-[#6ee7b7] underline decoration-[#10b981]/40 underline-offset-2 hover:text-white">{children}</a>,
-    }}
-  >
-    {content || ''}
-  </ReactMarkdown>
-);
-
-const CourseRunnerPage: React.FC = () => {
-  const { courseId, lessonId } = useParams();
-  const { courses, updateCourse, addConcept, startCoding, stopCoding } = useContext(AppContext)!;
-  const course = courses.find(item => item.id === courseId);
-  const sourceLesson = course?.modules.flatMap(module => module.lessons).find(lesson => lesson.id === lessonId);
-  const [lesson, setLesson] = useState<Lesson | undefined>(() => sourceLesson ? normalizeLesson(sourceLesson) : undefined);
-  const [activeTab, setActiveTab] = useState<'checks' | 'drills'>('checks');
-  const [checkAnswers, setCheckAnswers] = useState<Record<string, number>>({});
-  const [code, setCode] = useState('');
-  const [drillIndex] = useState(0);
-  const [feedback, setFeedback] = useState('');
-  const [completionNotice] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [generationStage, setGenerationStage] = useState('');
-  const [generationError, setGenerationError] = useState('');
-  const [externalAIPrompt, setExternalAIPrompt] = useState('');
-  const [showExternalAIPrompt, setShowExternalAIPrompt] = useState(false);
-
-  const generatedLessonKey = useRef<string | null>(null);
-  const drillEditorRef = useRef<HTMLDivElement>(null);
-  const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
-  const activeDrill: Drill | undefined = drills[drillIndex];
-
-  useEffect(() => {
-    startCoding();
-    return () => stopCoding();
-  }, []);
-
-  useEffect(() => {
-    const editor = drillEditorRef.current?.querySelector('textarea');
-    if (!editor) return;
-    editor.style.height = 'auto';
-    editor.style.height = `${Math.min(Math.max(editor.scrollHeight, 192), 420)}px`;
-  }, [code, drillIndex, lesson?.drills, lesson?.capstone]);
-
-  useEffect(() => {
-    const rawCode = activeDrill ? getStarterCode(activeDrill) : '';
-    setCode(cleanCodeSnippet(rawCode));
-  }, [activeDrill?.id]);
-
-  useEffect(() => {
-    if (activeDrill) {
-      const savedCode = localStorage.getItem(`codevault_solution_${courseId}_${lessonId}_${activeDrill.id}`);
-      if (savedCode) setCode(savedCode);
+  // 2. Strip markdown fences ```json ... ``` / ```JSON ... ``` / ``` ... ```
+  const fenced = rawText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim()) as T;
+    } catch {
+      /* fall through */
     }
-  }, [activeDrill?.id, courseId, lessonId]);
+  }
 
-  useEffect(() => {
-    if (activeDrill) {
-      localStorage.setItem(`codevault_solution_${courseId}_${lessonId}_${activeDrill.id}`, code);
+  // 3. Grab the outermost { ... } block (handles prose preambles like
+  //    "Here is your lesson:\n\n{...}")
+  const start = rawText.indexOf('{');
+  const end = rawText.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    const candidate = rawText.slice(start, end + 1);
+    try {
+      return JSON.parse(candidate) as T;
+    } catch (error) {
+      // Give a useful error message that includes what went wrong positionally
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Model returned malformed JSON (${message}). ` +
+        `First 200 characters of response: ${candidate.slice(0, 200)}`
+      );
     }
-  }, [code, activeDrill?.id, courseId, lessonId]);
+  }
 
-  useEffect(() => {
-    const lessonKey = `${courseId || ''}:${lessonId || ''}`;
-    if (!course || !sourceLesson || sourceLesson.contentMarkdown || generatedLessonKey.current === lessonKey) return;
-    generatedLessonKey.current = lessonKey;
-    setIsLoading(true);
-    setGenerationError('');
-    setGenerationStage('Preparing lesson generation...');
-    void generateCourseLesson(course, sourceLesson.title, setGenerationStage)
-      .then(generated => {
-        if (!generated) throw new Error('The AI returned an incomplete lesson.');
-        const hydrated = normalizeLesson({ ...sourceLesson, ...generated, id: sourceLesson.id });
-        setLesson(hydrated);
-        updateCourse(course.id, { modules: course.modules.map(module => ({ ...module, lessons: module.lessons.map(item => item.id === hydrated.id ? hydrated : item) })) });
-      })
-      .catch(error => {
-        const message = error instanceof Error ? error.message : 'Lesson generation failed.';
-        setGenerationStage(message);
-        setGenerationError(message);
-      })
-      .finally(() => setIsLoading(false));
-  }, [courseId, lessonId]);
-
-  useEffect(() => {
-    if (!sourceLesson?.contentMarkdown) return;
-    const normalized = normalizeLesson(sourceLesson);
-    if (normalized.conceptChecks?.length === sourceLesson.conceptChecks?.length) return;
-    setLesson(normalized);
-    updateCourse(course?.id || '', { modules: course?.modules.map(module => ({ ...module, lessons: module.lessons.map(item => item.id === normalized.id ? normalized : item) })) || [] });
-  }, [courseId, lessonId]);
-
-  if (!course || !lesson) return <div className="text-sm text-[#8a8f98]">Lesson not found.</div>;
-  const completedChecks = (lesson.conceptChecks || []).filter(check => checkAnswers[check.id] === check.correctIndex).length;
-
-  const submitDrill = async () => {
-    if (!activeDrill) return;
-    setFeedback('Generating prompt for external AI...');
-    const prompt = `Please review the following C++ code for the drill "${activeDrill.title}":\n\n${code}\n\nInstructions: ${activeDrill.instructions}\n\nPlease provide feedback on whether the code correctly solves the problem and any suggestions for improvement.`;
-    setExternalAIPrompt(prompt);
-    setShowExternalAIPrompt(true);
-    setFeedback('Prompt generated. Please use an external AI to check your code.');
-  };
-
-  return (
-    <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <Link to={`/courses/${course.id}`} className="text-xs text-[#8a8f98] hover:text-white">← {course.title}</Link>
-        <span className="text-[11px] text-[#10b981]">C++23 deep work session</span>
-      </div>
-      {isLoading ? (
-        <div className="linear-card p-10 text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-[#10b981]/30 border-t-[#10b981]" />
-          <p className="text-sm text-white">Generating lesson...</p>
-          <p className="mt-2 text-xs text-[#8a8f98]">{generationStage || 'The course models are preparing your reading and exercises.'}</p>
-          <div className="mx-auto mt-5 h-1 max-w-xs overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#10b981]" /></div>
-        </div>
-      ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
-          <article className="linear-card overflow-y-auto p-6">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#10b981]">Lesson</p>
-            <h1 className="mt-2 text-xl font-bold text-white">{lesson.title}</h1>
-            <p className="mt-2 text-xs text-[#8a8f98]">{lesson.overview}</p>
-            {generationError && <p className="mt-4 rounded-md border border-[#f43f5e]/30 bg-[#f43f5e]/10 p-3 text-xs leading-relaxed text-[#fda4af]">Lesson generation failed: {generationError}</p>}
-            {lesson.contentMarkdown ? <div className="mt-6"><LessonMarkdown content={lesson.contentMarkdown} /></div> : <p className="mt-6 text-sm text-[#dedede]">Lesson content is not available. Configure the Course Generation provider in AI settings.</p>}
-            <button type="button" onClick={() => addConcept({ name: lesson.title, description: lesson.overview || lesson.title, relatedProblems: [], relatedNotes: [], notes: lesson.contentMarkdown || '' })} className="mt-6 rounded-md border border-[#c084fc]/30 px-3 py-2 text-xs text-[#d8b4fe] hover:bg-[#c084fc]/10">Save lesson to Concepts</button>
-          </article>
-          <aside className="linear-card flex flex-col p-5">
-            <div className="flex gap-2 border-b border-white/[0.08] pb-3">
-              <button type="button" onClick={() => setActiveTab('checks')} className={`px-2 py-1 text-xs ${activeTab === 'checks' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>Concept Checks</button>
-              <button type="button" onClick={() => setActiveTab('drills')} className={`px-2 py-1 text-xs ${activeTab === 'drills' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>C++ Drills</button>
-            </div>
-            {activeTab === 'checks' ? (
-              <div className="mt-4 space-y-4">
-                <p className="text-xs text-[#8a8f98]">{completedChecks}/{(lesson.conceptChecks || []).length} checks correct</p>
-                {(lesson.conceptChecks || []).map(check => (
-                  <div key={check.id} className="rounded-lg border border-white/[0.08] p-4">
-                    <p className="text-sm font-semibold text-white">{check.question}</p>
-                    <div className="mt-3 grid gap-2">
-                      {check.options.map((option, index) => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))}
-                          className={`rounded-md border px-3 py-2 text-left text-xs ${
-                            checkAnswers[check.id] === index
-                              ? index === check.correctIndex
-                                ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]'
-                                : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]'
-                              : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'
-                          }`}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
-                    {checkAnswers[check.id] !== undefined && <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-4 flex flex-col">
-                {activeDrill ? (
-                  <>
-                    <p className="text-xs font-semibold text-white">{activeDrill.title}</p>
-                    <div className="mt-3 text-xs leading-6 text-[#b7bbc3]"><LessonMarkdown content={activeDrill.instructions} /></div>
-                    {completionNotice && <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">{completionNotice}</p>}
-                    <div ref={drillEditorRef} className="mt-4">
-                      <CppPredictiveEditor
-                        id={`${activeDrill.id}-code`}
-                        value={code}
-                        onChange={(userEditableValue) => setCode(cleanCodeSnippet(userEditableValue))}
-                        minHeight={210}
-                        maxHeight={440}
-                        aria-label={`${activeDrill.title} editable C++ implementation`}
-                      />
-                    </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <button type="button" onClick={() => void submitDrill()} className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold">Run and grade drill</button>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      <div className="flex items-start">
-                        <div className="flex-shrink-0">
-                          {feedback.includes('Finished') || feedback.includes('Great job') || feedback.includes('passes') ? (
-                            <span className="text-xs text-[#10b981]">✓</span>
-                          ) : (
-                            <span className="text-xs text-[#f43f5e]">✗</span>
-                          )}
-                        </div>
-                        <div className="ml-2 text-xs text-[#8a8f98] whitespace-pre-wrap break-words">{feedback}</div>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-xs text-[#8a8f98]">No drills available yet.</p>
-                )}
-              </div>
-            )}
-          </aside>
-        </div>
-      )}
-      {showExternalAIPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="linear-card max-w-lg p-6">
-            <h3 className="text-sm font-semibold text-white">External AI Prompt</h3>
-            <textarea
-              readOnly
-              value={externalAIPrompt}
-              className="mt-3 h-40 w-full rounded-md border border-white/10 bg-[#090b0f] p-3 text-xs font-mono text-[#dedede]"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => navigator.clipboard.writeText(externalAIPrompt)}
-                className="linear-btn-primary px-3 py-1.5 text-xs"
-              >
-                Copy Prompt
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowExternalAIPrompt(false)}
-                className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-[#8a8f98] hover:text-white"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+  throw new Error(
+    'Model did not return JSON at all. First 200 characters of response: ' +
+    rawText.slice(0, 200)
   );
 };
 
-export default CourseRunnerPage;
+/* ------------------------------------------------------------------ */
+/*  Validation                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface GeneratedLesson {
+  overview?: string;
+  contentMarkdown?: string;
+  conceptChecks?: Array<{
+    id?: string;
+    question?: string;
+    options?: string[];
+    correctIndex?: number;
+    explanation?: string;
+  }>;
+  drills?: Array<{
+    id?: string;
+    title?: string;
+    instructions?: string;
+    starterCode?: string;
+    gradingTokens?: string[];
+    hints?: string[];
+    hiddenTests?: string[];
+  }>;
+}
+
+const validateGeneratedLesson = (parsed: unknown): GeneratedLesson => {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('The AI response was not a JSON object.');
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  if (typeof obj.contentMarkdown !== 'string' || !obj.contentMarkdown.trim()) {
+    throw new Error('The AI response was missing lesson content (contentMarkdown).');
+  }
+  if (!Array.isArray(obj.conceptChecks) && obj.conceptChecks != null) {
+    throw new Error('conceptChecks was present but not an array.');
+  }
+  if (!Array.isArray(obj.drills) && obj.drills != null) {
+    throw new Error('drills was present but not an array.');
+  }
+
+  return obj as GeneratedLesson;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Prompt                                                             */
+/* ------------------------------------------------------------------ */
+
+const buildLessonPrompt = (course: Course, lessonTitle: string): string => `
+You are generating a single C++23 lesson for the course "${course.title}".
+
+The lesson is titled "${lessonTitle}".
+
+Respond with ONLY a single valid JSON object matching this exact shape.
+Do NOT use markdown code fences. Do NOT write any commentary before or after the JSON.
+
+{
+  "overview": "one-sentence summary of the lesson",
+  "contentMarkdown": "the full lesson body written in GitHub-flavored Markdown",
+  "conceptChecks": [
+    {
+      "id": "check-1",
+      "question": "a multiple choice question",
+      "options": ["option A", "option B", "option C", "option D"],
+      "correctIndex": 0,
+      "explanation": "why that answer is correct"
+    }
+  ],
+  "drills": [
+    {
+      "id": "drill-1",
+      "title": "short drill name",
+      "instructions": "markdown instructions for the coding exercise",
+      "starterCode": "#include <iostream>\\n\\nint main() {\\n  // TODO\\n}\\n",
+      "gradingTokens": ["token1", "token2"],
+      "hints": ["hint one", "hint two"],
+      "hiddenTests": []
+    }
+  ]
+}
+
+Rules:
+- contentMarkdown must be substantial teaching material with headers, examples in \`\`\`cpp blocks, and explanations.
+- starterCode must be a compilable C++ skeleton with TODO comments.
+- Include at least 3 concept checks and at least 1 drill.
+- Escape all newlines inside JSON strings properly (use \\n).
+`;
+
+/* ------------------------------------------------------------------ */
+/*  Main entry point                                                   */
+/* ------------------------------------------------------------------ */
+
+export const generateCourseLesson = async (
+  course: Course,
+  lessonTitle: string,
+  onStage: GenerationStageUpdater,
+): Promise<GeneratedLesson | null> => {
+  onStage('Building prompt...');
+
+  const apiKey = localStorage.getItem('codevault_openai_api_key') || '';
+  const model = localStorage.getItem('codevault_course_model') || 'gpt-4o';
+
+  if (!apiKey) {
+    throw new Error('No Course Generation provider configured. Add your API key in AI settings.');
+  }
+
+  onStage('Requesting lesson from the model...');
+  let rawResponse = '';
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: buildLessonPrompt(course, lessonTitle) }],
+        temperature: 0.7,
+        // Hard-enforces JSON output when supported — eliminates fence/prose issues
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`Provider request failed (response.status).{response.status}).response.status).{errorBody.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    rawResponse = data.choices?.[0]?.message?.content ?? '';
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Provider request failed')) throw error;
+    throw new Error('Network error while contacting the course generation provider.');
+  }
+
+  onStage('Parsing the model response...');
+  console.log('[generateCourseLesson] RAW MODEL OUTPUT:', rawResponse);
+
+  let parsed: GeneratedLesson;
+  try {
+    parsed = validateGeneratedLesson(extractJson<GeneratedLesson>(rawResponse));
+  } catch (error) {
+    // Re-throw so the caller's catch shows a precise message
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+
+  // Normalize ids in case the model omitted them
+  parsed.conceptChecks = (parsed.conceptChecks || []).map((check, index) => ({
+    ...check,
+    id: check.id || `generated-check-${index + 1}`,
+    question: check.question || '',
+    options: check.options || [],
+    correctIndex: typeof check.correctIndex === 'number' ? check.correctIndex : 0,
+    explanation: check.explanation || '',
+  }));
+  parsed.drills = (parsed.drills || []).map((drill, index) => ({
+    ...drill,
+    id: drill.id || `generated-drill-${index + 1}`,
+    title: drill.title || `Drill ${index + 1}`,
+    instructions: drill.instructions || '',
+    gradingTokens: drill.gradingTokens || [],
+    hints: drill.hints || [],
+    hiddenTests: drill.hiddenTests || [],
+  }));
+
+  onStage('Lesson ready.');
+  return parsed;
+};
