@@ -1,3 +1,5 @@
+// Replace your CourseRunnerPage.tsx with this fixed version:
+
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -30,15 +32,10 @@ const normalizeLesson = (lesson: Lesson): Lesson => {
 const cleanCodeSnippet = (rawCode: string) => {
   if (!rawCode) return '';
   return rawCode
-    .replace(/^```[a-z]*\s*\n?/i, '') // Removes leading ```cpp or ```
-    .replace(/\s*```\s*$/, '')        // Removes trailing ```
+    .replace(/^```[a-z]*\s*\n?/i, '')
+    .replace(/\s*```\s*$/, '')
     .split('\n')
-    // Only filter out lines that are strictly a rogue standalone '#' artifact
-    // Do NOT filter out 'i', because it's needed for 'int', 'if', loops, etc.
-    .filter(line => {
-      const trimmed = line.trim();
-      return trimmed !== '#'; 
-    })
+    .filter(line => line.trim() !== '#')
     .join('\n');
 };
 
@@ -61,8 +58,6 @@ int main() {
 }
 `;
 };
-
-// No longer needed - we want the full code including main function
 
 const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
   <ReactMarkdown
@@ -92,19 +87,22 @@ const LessonMarkdown: React.FC<{ content: string }> = ({ content }) => (
 
 const CourseRunnerPage: React.FC = () => {
   const { courseId, lessonId } = useParams();
-  const { courses, updateCourse, addMistake, addConcept, startCoding, stopCoding } = useContext(AppContext)!;
+  const { courses, updateCourse, addConcept, startCoding, stopCoding } = useContext(AppContext)!;
   const course = courses.find(item => item.id === courseId);
   const sourceLesson = course?.modules.flatMap(module => module.lessons).find(lesson => lesson.id === lessonId);
   const [lesson, setLesson] = useState<Lesson | undefined>(() => sourceLesson ? normalizeLesson(sourceLesson) : undefined);
   const [activeTab, setActiveTab] = useState<'checks' | 'drills'>('checks');
   const [checkAnswers, setCheckAnswers] = useState<Record<string, number>>({});
   const [code, setCode] = useState('');
-  const [drillIndex, setDrillIndex] = useState(0);
+  const [drillIndex] = useState(0);
   const [feedback, setFeedback] = useState('');
-  const [completionNotice, setCompletionNotice] = useState('');
+  const [completionNotice] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [generationStage, setGenerationStage] = useState('');
   const [generationError, setGenerationError] = useState('');
+  const [externalAIPrompt, setExternalAIPrompt] = useState('');
+  const [showExternalAIPrompt, setShowExternalAIPrompt] = useState(false);
+
   const generatedLessonKey = useRef<string | null>(null);
   const drillEditorRef = useRef<HTMLDivElement>(null);
   const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
@@ -122,30 +120,24 @@ const CourseRunnerPage: React.FC = () => {
     editor.style.height = `${Math.min(Math.max(editor.scrollHeight, 192), 420)}px`;
   }, [code, drillIndex, lesson?.drills, lesson?.capstone]);
 
-  // 2. Sanitize the code here when setting initial starter code
   useEffect(() => {
     const rawCode = activeDrill ? getStarterCode(activeDrill) : '';
     setCode(cleanCodeSnippet(rawCode));
   }, [activeDrill?.id]);
 
-  // Load saved solution from localStorage when drill changes
   useEffect(() => {
     if (activeDrill) {
       const savedCode = localStorage.getItem(`codevault_solution_${courseId}_${lessonId}_${activeDrill.id}`);
-      if (savedCode) {
-        setCode(savedCode);
-      }
+      if (savedCode) setCode(savedCode);
     }
   }, [activeDrill?.id, courseId, lessonId]);
 
-  // Save solution to localStorage whenever code changes
   useEffect(() => {
     if (activeDrill) {
       localStorage.setItem(`codevault_solution_${courseId}_${lessonId}_${activeDrill.id}`, code);
     }
   }, [code, activeDrill?.id, courseId, lessonId]);
 
-  
   useEffect(() => {
     const lessonKey = `${courseId || ''}:${lessonId || ''}`;
     if (!course || !sourceLesson || sourceLesson.contentMarkdown || generatedLessonKey.current === lessonKey) return;
@@ -179,166 +171,138 @@ const CourseRunnerPage: React.FC = () => {
   if (!course || !lesson) return <div className="text-sm text-[#8a8f98]">Lesson not found.</div>;
   const completedChecks = (lesson.conceptChecks || []).filter(check => checkAnswers[check.id] === check.correctIndex).length;
 
-  const saveLesson = (updates: Partial<Lesson>) => {
-    const nextLesson = { ...lesson, ...updates };
-    setLesson(nextLesson);
-    updateCourse(course.id, { overallProgress: Math.round(((course.modules.flatMap(module => module.lessons).filter(item => item.id === nextLesson.id || item.isCompleted).length) / course.modules.reduce((sum, module) => sum + module.lessons.length, 0)) * 100), modules: course.modules.map(module => ({ ...module, lessons: module.lessons.map(item => item.id === nextLesson.id ? nextLesson : item) })) });
-  };
-
   const submitDrill = async () => {
     if (!activeDrill) return;
     setFeedback('Generating prompt for external AI...');
-    // Generate a prompt that the user can copy and paste into an external AI
     const prompt = `Please review the following C++ code for the drill "${activeDrill.title}":\n\n${code}\n\nInstructions: ${activeDrill.instructions}\n\nPlease provide feedback on whether the code correctly solves the problem and any suggestions for improvement.`;
     setExternalAIPrompt(prompt);
     setShowExternalAIPrompt(true);
     setFeedback('Prompt generated. Please use an external AI to check your code.');
   };
 
-    return (
-      <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <Link to={`/courses/${course.id}`} className="text-xs text-[#8a8f98] hover:text-white">← {course.title}</Link>
-          <span className="text-[11px] text-[#10b981]">C++23 deep work session</span>
+  return (
+    <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <Link to={`/courses/${course.id}`} className="text-xs text-[#8a8f98] hover:text-white">← {course.title}</Link>
+        <span className="text-[11px] text-[#10b981]">C++23 deep work session</span>
+      </div>
+      {isLoading ? (
+        <div className="linear-card p-10 text-center">
+          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-[#10b981]/30 border-t-[#10b981]" />
+          <p className="text-sm text-white">Generating lesson...</p>
+          <p className="mt-2 text-xs text-[#8a8f98]">{generationStage || 'The course models are preparing your reading and exercises.'}</p>
+          <div className="mx-auto mt-5 h-1 max-w-xs overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#10b981]" /></div>
         </div>
-        {isLoading ? (
-          <div className="linear-card p-10 text-center">
-            <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-[#10b981]/30 border-t-[#10b981]" />
-            <p className="text-sm text-white">Generating lesson...</p>
-            <p className="mt-2 text-xs text-[#8a8f98]">{generationStage || 'The course models are preparing your reading and exercises.'}</p>
-            <div className="mx-auto mt-5 h-1 max-w-xs overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#10b981]" /></div>
-          </div>
-        ) : (
-          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
-            <article className="linear-card overflow-y-auto p-6">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#10b981]">Lesson</p>
-              <h1 className="mt-2 text-xl font-bold text-white">{lesson.title}</h1>
-              <p className="mt-2 text-xs text-[#8a8f98]">{lesson.overview}</p>
-              {generationError && <p className="mt-4 rounded-md border border-[#f43f5e]/30 bg-[#f43f5e]/10 p-3 text-xs leading-relaxed text-[#fda4af]">Lesson generation failed: {generationError}</p>}
-              {lesson.contentMarkdown ? <div className="mt-6"><LessonMarkdown content={lesson.contentMarkdown} /></div> : <p className="mt-6 text-sm text-[#dedede]">Lesson content is not available. Configure the Course Generation provider in AI settings.</p>}
-              <button type="button" onClick={() => addConcept({ name: lesson.title, description: lesson.overview || lesson.title, relatedProblems: [], relatedNotes: [], notes: lesson.contentMarkdown || '' })} className="mt-6 rounded-md border border-[#c084fc]/30 px-3 py-2 text-xs text-[#d8b4fe] hover:bg-[#c084fc]/10">Save lesson to Concepts</button>
-            </article>
-            <aside className="linear-card flex flex-col p-5">
-              <div className="flex gap-2 border-b border-white/[0.08] pb-3">
-                <button type="button" onClick={() => setActiveTab('checks')} className={`px-2 py-1 text-xs ${activeTab === 'checks' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>Concept Checks</button>
-                <button type="button" onClick={() => setActiveTab('drills')} className={`px-2 py-1 text-xs ${activeTab === 'drills' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>C++ Drills</button>
+      ) : (
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
+          <article className="linear-card overflow-y-auto p-6">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#10b981]">Lesson</p>
+            <h1 className="mt-2 text-xl font-bold text-white">{lesson.title}</h1>
+            <p className="mt-2 text-xs text-[#8a8f98]">{lesson.overview}</p>
+            {generationError && <p className="mt-4 rounded-md border border-[#f43f5e]/30 bg-[#f43f5e]/10 p-3 text-xs leading-relaxed text-[#fda4af]">Lesson generation failed: {generationError}</p>}
+            {lesson.contentMarkdown ? <div className="mt-6"><LessonMarkdown content={lesson.contentMarkdown} /></div> : <p className="mt-6 text-sm text-[#dedede]">Lesson content is not available. Configure the Course Generation provider in AI settings.</p>}
+            <button type="button" onClick={() => addConcept({ name: lesson.title, description: lesson.overview || lesson.title, relatedProblems: [], relatedNotes: [], notes: lesson.contentMarkdown || '' })} className="mt-6 rounded-md border border-[#c084fc]/30 px-3 py-2 text-xs text-[#d8b4fe] hover:bg-[#c084fc]/10">Save lesson to Concepts</button>
+          </article>
+          <aside className="linear-card flex flex-col p-5">
+            <div className="flex gap-2 border-b border-white/[0.08] pb-3">
+              <button type="button" onClick={() => setActiveTab('checks')} className={`px-2 py-1 text-xs ${activeTab === 'checks' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>Concept Checks</button>
+              <button type="button" onClick={() => setActiveTab('drills')} className={`px-2 py-1 text-xs ${activeTab === 'drills' ? 'font-semibold text-white' : 'text-[#8a8f98]'}`}>C++ Drills</button>
+            </div>
+            {activeTab === 'checks' ? (
+              <div className="mt-4 space-y-4">
+                <p className="text-xs text-[#8a8f98]">{completedChecks}/{(lesson.conceptChecks || []).length} checks correct</p>
+                {(lesson.conceptChecks || []).map(check => (
+                  <div key={check.id} className="rounded-lg border border-white/[0.08] p-4">
+                    <p className="text-sm font-semibold text-white">{check.question}</p>
+                    <div className="mt-3 grid gap-2">
+                      {check.options.map((option, index) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))}
+                          className={`rounded-md border px-3 py-2 text-left text-xs ${
+                            checkAnswers[check.id] === index
+                              ? index === check.correctIndex
+                                ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]'
+                                : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]'
+                              : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'
+                          }`}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                    {checkAnswers[check.id] !== undefined && <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>}
+                  </div>
+                ))}
               </div>
-                {activeTab === 'checks' ? (
-    <div className="mt-4 space-y-4">
-      <p className="text-xs text-[#8a8f98]">
-        {completedChecks}/{(lesson.conceptChecks || []).length} checks correct
-      </p>
-      {(lesson.conceptChecks || []).map(check => (
-        <div key={check.id} className="rounded-lg border border-white/[0.08] p-4">
-          <p className="text-sm font-semibold text-white">{check.question}</p>
-          <div className="mt-3 grid gap-2">
-            {check.options.map((option, index) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setCheckAnswers(current => ({ ...current, [check.id]: index }))}
-                className={`rounded-md border px-3 py-2 text-left text-xs ${
-                  checkAnswers[check.id] === index
-                    ? index === check.correctIndex
-                      ? 'border-[#10b981]/50 bg-[#10b981]/10 text-[#6ee7b7]'
-                      : 'border-[#f43f5e]/50 bg-[#f43f5e]/10 text-[#fda4af]'
-                    : 'border-white/[0.1] text-[#b7bbc3] hover:bg-white/[0.04]'
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-          {checkAnswers[check.id] !== undefined && (
-            <p className="mt-3 text-xs text-[#8a8f98]">{check.explanation}</p>
-          )}
-        </div>
-      ))}
-    </div>
-  ) : (
-    <div className="mt-4 flex flex-col">
-      {activeDrill ? (
-        <>
-          <p className="text-xs font-semibold text-white">{activeDrill.title}</p>
-          <div className="mt-3 text-xs leading-6 text-[#b7bbc3]">
-            <LessonMarkdown content={activeDrill.instructions} />
-          </div>
-          {completionNotice && (
-            <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">
-              {completionNotice}
-            </p>
-          )}
+            ) : (
+              <div className="mt-4 flex flex-col">
+                {activeDrill ? (
+                  <>
+                    <p className="text-xs font-semibold text-white">{activeDrill.title}</p>
+                    <div className="mt-3 text-xs leading-6 text-[#b7bbc3]"><LessonMarkdown content={activeDrill.instructions} /></div>
+                    {completionNotice && <p className="mt-3 rounded-md border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-2 text-xs font-semibold text-[#6ee7b7]">{completionNotice}</p>}
                     <div ref={drillEditorRef} className="mt-4">
-            <CppPredictiveEditor
-              id={`${activeDrill.id}-code`}
-              value={code}
-              onChange={(userEditableValue) => {
-                // Clean the input to remove any stray artifacts before storing
-                setCode(cleanCodeSnippet(userEditableValue));
-              }}
-              minHeight={210}
-              maxHeight={440}
-              aria-label={`${activeDrill.title} editable C++ implementation`}
-            />
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void submitDrill()}
-              className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold"
-            >
-              Run and grade drill
-            </button>
-          </div>
-          <div className="mt-3 space-y-2">
-            {/* Feedback header */}
-            <div className="flex items-start">
-              <div className="flex-shrink-0">
-                {feedback.includes('Finished') || feedback.includes('Great job') || feedback.includes('passes') ? (
-                  <span className="text-xs text-[#10b981]">✓</span>
+                      <CppPredictiveEditor
+                        id={`${activeDrill.id}-code`}
+                        value={code}
+                        onChange={(userEditableValue) => setCode(cleanCodeSnippet(userEditableValue))}
+                        minHeight={210}
+                        maxHeight={440}
+                        aria-label={`${activeDrill.title} editable C++ implementation`}
+                      />
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <button type="button" onClick={() => void submitDrill()} className="linear-btn-primary ml-auto px-4 py-2 text-xs font-semibold">Run and grade drill</button>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-start">
+                        <div className="flex-shrink-0">
+                          {feedback.includes('Finished') || feedback.includes('Great job') || feedback.includes('passes') ? (
+                            <span className="text-xs text-[#10b981]">✓</span>
+                          ) : (
+                            <span className="text-xs text-[#f43f5e]">✗</span>
+                          )}
+                        </div>
+                        <div className="ml-2 text-xs text-[#8a8f98] whitespace-pre-wrap break-words">{feedback}</div>
+                      </div>
+                    </div>
+                  </>
                 ) : (
-                  <span className="text-xs text-[#f43f5e]">✗</span>
+                  <p className="text-xs text-[#8a8f98]">No drills available yet.</p>
                 )}
               </div>
-              <div className="ml-2 text-xs text-[#8a8f98] whitespace-pre-wrap break-words">
-                {feedback}
-              </div>
-            </div>
-          </div>
-        </>
-      ) : (
-        <p className="text-xs text-[#8a8f98]">No drills available yet.</p>
-      )}
-
-      {/* Lesson completion popup - shows when both concept checks and all drills are finished */}
-      {lesson?.isCompleted &&
-       (lesson.conceptChecks?.length === 0 ||
-        completedChecks === (lesson.conceptChecks || []).length) && (
-        <div className="mt-6 w-full">
-          <div className="rounded-lg border border-[#10b981]/30 bg-[#10b981]/10 p-6 text-center">
-            <p className="mb-4 text-lg font-semibold text-[#6ee7b7]">
-              Lesson Complete! 🎉
-            </p>
-            <p className="mb-4 text-sm text-[#dedede]">
-              You've finished all concept checks and drills for this lesson.
-            </p>
-            <button
-              onClick={() => {
-                // Navigate to next lesson - this would be handled by course navigation
-                // For now, we'll just reset to allow continuing or let the UI handle it
-                // The lesson completion is already saved via saveLesson in submitDrill
-              }}
-              className="w-full bg-[#10b981]/20 hover:bg-[#10b981]/30 text-[#6ee7b7]
-                       px-4 py-2 rounded font-semibold transition-colors"
-            >
-              Next Lesson
-            </button>
-          </div>
+            )}
+          </aside>
         </div>
       )}
-    </div>
-  )}
-          </aside>
+      {showExternalAIPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="linear-card max-w-lg p-6">
+            <h3 className="text-sm font-semibold text-white">External AI Prompt</h3>
+            <textarea
+              readOnly
+              value={externalAIPrompt}
+              className="mt-3 h-40 w-full rounded-md border border-white/10 bg-[#090b0f] p-3 text-xs font-mono text-[#dedede]"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => navigator.clipboard.writeText(externalAIPrompt)}
+                className="linear-btn-primary px-3 py-1.5 text-xs"
+              >
+                Copy Prompt
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowExternalAIPrompt(false)}
+                className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-[#8a8f98] hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
