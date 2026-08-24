@@ -1,4 +1,4 @@
-import type { Course, Drill, Lesson } from '../types/course';
+import type { Course, Lesson } from '../types/course';
 import { jsonrepair } from 'jsonrepair';
 
 export type AiTask =
