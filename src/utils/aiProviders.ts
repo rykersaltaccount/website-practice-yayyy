@@ -1,4 +1,3 @@
-import type { Concept } from '../types';
 import type { Course, Drill, Lesson } from '../types/course';
 import { jsonrepair } from 'jsonrepair';
 
