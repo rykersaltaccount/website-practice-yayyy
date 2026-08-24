@@ -2,7 +2,15 @@ import type { Concept } from '../types';
 import type { Course, Drill, Lesson } from '../types/course';
 import { jsonrepair } from 'jsonrepair';
 
-export type AiTask = 'helper' | 'course' | 'course-syllabus' | 'course-lesson' | 'course-reading';
+export type AiTask = 
+  | 'helper' 
+  | 'course' 
+  | 'course-syllabus' 
+  | 'course-lesson' 
+  | 'course-reading' 
+  | 'course-grading' 
+  | 'practice' 
+  | 'test';
 export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
 
 export interface AiConfig {
