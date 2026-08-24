@@ -161,21 +161,32 @@ export const testAiConfig = async (config: AiConfig): Promise<AiConnectionTestRe
 };
 
 const extractJson = (text: string): unknown => {
-  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  const candidates = [cleaned];
+  let cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   const firstObject = cleaned.indexOf('{');
   const lastObject = cleaned.lastIndexOf('}');
-  if (firstObject >= 0 && lastObject > firstObject) candidates.push(cleaned.slice(firstObject, lastObject + 1));
-
-  let lastError: unknown;
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(jsonrepair(candidate));
-    } catch (error) {
-      lastError = error;
-    }
+  if (firstObject >= 0 && lastObject > firstObject) {
+    cleaned = cleaned.slice(firstObject, lastObject + 1);
   }
-  throw lastError instanceof Error ? lastError : new Error('AI returned invalid JSON.');
+
+  // Attempt 1: Direct standard parse
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+
+  // Attempt 2: Standard jsonrepair
+  try {
+    return JSON.parse(jsonrepair(cleaned));
+  } catch {}
+
+  // Attempt 3: Sanitize raw control characters and unescaped line breaks before repair
+  try {
+    const sanitized = cleaned
+      .replace(/[\r\n]+/g, '\\n')
+      .replace(/\t/g, '\\t');
+    return JSON.parse(jsonrepair(sanitized));
+  } catch (error) {
+    throw error instanceof Error ? error : new Error('AI returned invalid JSON structure.');
+  }
 };
 
 
@@ -319,12 +330,13 @@ export const generateCourseLesson = async (
   lessonTitle: string,
   onProgress?: GenerationProgress
 ): Promise<Lesson | null> => {
-  const jsonFormattingRules = `
+  const jsonFormattingRules = String.raw`
 CRITICAL JSON FORMATTING REQUIREMENTS:
 - Return ONLY valid raw JSON with double-quoted keys (e.g., "overview": "value").
 - Do NOT wrap response in markdown code blocks like \`\`\`json.
-- Properly escape all double quotes inside code snippets using backslashes (e.g. \\"Hello World\\").
-- Do NOT include raw line breaks inside string values. Use \\n instead.`;
+- Properly escape all double quotes inside code snippets using backslashes (e.g., \"Hello World\").
+- Inside C++ code examples, use single quotes where possible (e.g., 'Hello') or strictly escape double quotes.
+- Do NOT include raw line breaks inside string values; use \n instead.`;
 
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
   const contextBlock = webContext ? `\n\nUse this optional web research for factual accuracy only:\n${webContext}` : '';
@@ -355,8 +367,8 @@ ${contextBlock}`;
 
   try {
     const [readingResponse, interactiveResponse] = await Promise.all([
-      withTimeout(requestJson('course-reading', readingPrompt, 0.2, onProgress), 35000),
-      withTimeout(requestJson('course-lesson', interactivePrompt, 0.2, onProgress), 35000)
+      withTimeout(requestJson('course-reading', readingPrompt, 0.1, onProgress), 45000),
+      withTimeout(requestJson('course-lesson', interactivePrompt, 0.1, onProgress), 45000)
     ]) as [any, any];
 
     if (!readingResponse?.contentMarkdown || !interactiveResponse?.drills) {
