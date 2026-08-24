@@ -314,6 +314,34 @@ const withTimeout = <T>(promise: Promise<T>, ms = 35000): Promise<T> => {
   ]);
 };
 
+function cleanJsonResponse(rawText: string): string {
+  let cleaned = rawText.trim();
+
+  // Strip markdown code fences if the AI wrapped the JSON response in ```json ... ```
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+
+  // Fix unescaped backslashes (common in C++ code snippets or LaTeX math formatting)
+  // This replaces single backslashes that aren't valid JSON escape sequences
+  cleaned = cleaned.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\');
+
+  return cleaned;
+}
+
+function safeJsonParse<T>(rawText: string): T {
+  let cleaned = rawText.trim();
+
+  // Remove markdown triple backticks if present
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    // Escape unescaped control backslashes often found in C++ strings (\n, \t, etc.)
+    const sanitized = cleaned.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\');
+    return JSON.parse(sanitized) as T;
+  }
+}
+
 export const generateCourseLesson = async (
   course: Course,
   lessonTitle: string,
@@ -324,6 +352,7 @@ export const generateCourseLesson = async (
 
   const readingPrompt = `Generate an engaging lesson tutorial on "${lessonTitle}" for "${course.title}" (${course.level} level).
 PEDAGOGICAL STYLE: Warm, direct, freeCodeCamp style with clear markdown, bullet points, and code walk-throughs.
+STRICT RULE: Do NOT use raw single backslashes in JSON strings. Double escape all backslashes (e.g., use \\\\n or \\\\t).
 Return ONLY valid JSON matching:
 {
   "overview": "1-2 sentence overview",
@@ -331,6 +360,7 @@ Return ONLY valid JSON matching:
 }${contextBlock}`;
 
   const interactivePrompt = `Generate C++23 exercises for "${lessonTitle}" in "${course.title}".
+STRICT RULE: Do NOT use raw single backslashes in JSON strings. Double escape all backslashes.
 Return ONLY valid JSON matching:
 {
   "conceptChecks": [{ "question": "...", "options": ["A","B","C","D"], "correctIndex": 0, "explanation": "..." }],
@@ -341,7 +371,7 @@ Return ONLY valid JSON matching:
   onProgress?.('Generating reading and interactive exercises in parallel...');
 
   try {
-    // Run both AI requests simultaneously with exactly 4 arguments each
+    // Run both AI requests simultaneously
     const [readingResponse, interactiveResponse] = await Promise.all([
       withTimeout(requestJson('course-reading', readingPrompt, 0.2, onProgress), 35000),
       withTimeout(requestJson('course-lesson', interactivePrompt, 0.2, onProgress), 35000)
