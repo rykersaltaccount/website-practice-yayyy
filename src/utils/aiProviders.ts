@@ -372,8 +372,8 @@ ${contextBlock}`;
 
   try {
     const [readingResponse, interactiveResponse] = await Promise.all([
-      withTimeout(requestJson('course-reading', readingPrompt, 0.1, onProgress), 45000),
-      withTimeout(requestJson('course-lesson', interactivePrompt, 0.1, onProgress), 45000)
+      withTimeout(requestJson('course-reading', readingPrompt, 0.1, onProgress), 120000),
+      withTimeout(requestJson('course-lesson', interactivePrompt, 0.1, onProgress), 120000)
     ]) as [any, any];
 
     if (!readingResponse?.contentMarkdown || !interactiveResponse?.drills) {
