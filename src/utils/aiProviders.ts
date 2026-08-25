@@ -41,9 +41,9 @@ const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
 };
 
 const courseModels: Partial<Record<AiTask, AiConfig>> = {
-  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'qwen/qwen2.5-coder-32b-instruct' },
-  'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
-  'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.3-70b-instruct' },
+  'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
+  'course-reading':  { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
+  'course-lesson':   { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'qwen/qwen2.5-coder-32b-instruct' },
 };
 
 const oldCourseModels = new Set(['meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1']);
@@ -189,13 +189,29 @@ const extractJson = (text: string): unknown => {
       .replace(/\t/g, '\\t');
     return JSON.parse(jsonrepair(sanitized));
   } catch (error) {
-    // Pass the actual parse error message up so the AI knows EXACTLY what to fix
     const finalError = error instanceof Error ? error : (originalError instanceof Error ? originalError : new Error('Invalid JSON structure.'));
     throw finalError;
   }
 };
 
 type GenerationProgress = (message: string) => void;
+
+/* ------------------------------------------------------------------ */
+/*  Request options + retry plumbing (declared BEFORE first use)       */
+/* ------------------------------------------------------------------ */
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+interface RequestOpts {
+  temperature?: number;
+  timeoutMs?: number;
+  maxTokens?: number;
+  modelOverride?: string;
+}
+
+const RETRYABLE = ['timed out', 'HTTP 408', 'HTTP 429', 'HTTP 500', 'HTTP 502', 'HTTP 503', 'HTTP 504', 'proxy is unavailable'];
+const isRetryable = (error: unknown) =>
+  RETRYABLE.some(hint => (error instanceof Error ? error.message : String(error)).includes(hint));
 
 export const getWebContext = async (query: string): Promise<string> => {
   try {
@@ -217,12 +233,15 @@ export const getWebContext = async (query: string): Promise<string> => {
 const requestJson = async (
   task: AiTask,
   instruction: string,
-  temperature = 0.3,
-  onProgress?: GenerationProgress
+  opts: RequestOpts = {},
+  onProgress?: GenerationProgress,
 ): Promise<unknown | null> => {
+  const { temperature = 0.3, timeoutMs = 100_000, maxTokens = 4096, modelOverride } = opts;
+
   const config = getAiConfig(task);
+  const model = modelOverride || config.model;
   onProgress?.(`Preparing ${task} provider...`);
-  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) {
+  if (!config.endpoint.trim() || !model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) {
     throw new Error(`The ${task} profile is missing an endpoint, model, or API key.`);
   }
 
@@ -231,19 +250,19 @@ const requestJson = async (
   let body: string;
 
   if (config.provider === 'gemini') {
-    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+    url = `${config.endpoint}/${model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
     body = JSON.stringify({
       contents: [{ parts: [{ text: instruction }] }],
-      generationConfig: { temperature, maxOutputTokens: 4096, responseMimeType: 'application/json' },
+      generationConfig: { temperature, maxOutputTokens: maxTokens, responseMimeType: 'application/json' },
     });
   } else {
     if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
     body = JSON.stringify({
-      model: config.model,
+      model,
       ...(config.provider === 'ollama' ? { format: 'json' } : {}),
       ...(config.provider === 'nim' ? { response_format: { type: 'json_object' } } : {}),
       temperature,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       messages: [
         {
           role: 'system',
@@ -256,11 +275,11 @@ const requestJson = async (
   }
 
   try {
-    onProgress?.(`Sending request to ${config.model}...`);
+    onProgress?.(`Sending request to ${model}...`);
     let response: Response;
     try {
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 120000);
+      const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
       response = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -270,7 +289,7 @@ const requestJson = async (
       window.clearTimeout(timeout);
     } catch {
       throw new Error(
-        'The AI request timed out after 120 seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.'
+        `The AI request timed out after ${Math.round(timeoutMs / 1000)} seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.`
       );
     }
 
@@ -296,6 +315,53 @@ const requestJson = async (
   }
 };
 
+const requestJsonWithRetry = async (
+  task: AiTask,
+  instruction: string,
+  opts: RequestOpts & { attempts?: number } = {},
+  onProgress?: GenerationProgress,
+): Promise<unknown | null> => {
+  const { attempts = 3, ...rest } = opts;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      // Last resort: fall back to the fast 8B model so NIM congestion can't kill the run
+      const useFastFallback =
+        attempt === attempts - 1 &&
+        task.startsWith('course') &&
+        getAiConfig(task).provider === 'nim';
+      return await requestJson(task, instruction, {
+        ...rest,
+        modelOverride: useFastFallback ? 'meta/llama-3.1-8b-instruct' : rest.modelOverride,
+      }, onProgress);
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1 || !isRetryable(error)) throw error;
+      const backoff = 2500 * 2 ** attempt + Math.random() * 1000;
+      onProgress?.(`Attempt ${attempt + 1} failed — retrying in ${Math.round(backoff / 1000)}s…`);
+      await sleep(backoff);
+    }
+  }
+  throw lastError;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Shared prompt fragments                                            */
+/* ------------------------------------------------------------------ */
+
+const jsonFormattingRules = `
+CRITICAL JSON FORMATTING REQUIREMENTS:
+- Return ONLY valid raw JSON with double-quoted keys.
+- Do NOT wrap the response in markdown code fences.
+- Properly escape all double quotes inside code snippets (e.g., \"Hello World\").
+- Prefer single quotes inside C++ code examples; otherwise strictly escape double quotes.
+- Do NOT include raw line breaks inside JSON strings; use \\n instead.`;
+
+/* ------------------------------------------------------------------ */
+/*  Syllabus                                                           */
+/* ------------------------------------------------------------------ */
+
 export const generateCourseSyllabus = async (
   topic: string,
   level: Course['level'],
@@ -311,7 +377,7 @@ export const generateCourseSyllabus = async (
     webContext || 'No web research was available.'
   }\nReturn only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for later deep lesson writers. Do not use a marketing tone.`;
 
-  const result = (await requestJson('course-syllabus', syllabusPrompt, 0.2, onProgress)) as Omit<
+  const result = (await requestJsonWithRetry('course-syllabus', syllabusPrompt, { temperature: 0.2 }, onProgress)) as Omit<
     Course,
     'id' | 'createdAt' | 'overallProgress'
   > | null;
@@ -320,91 +386,67 @@ export const generateCourseSyllabus = async (
   return { ...result, id: crypto.randomUUID(), createdAt: new Date().toISOString(), overallProgress: 0 };
 };
 
-// Timeout wrapper to prevent hanging requests
-const withTimeout = <T>(promise: Promise<T>, ms = 35000): Promise<T> => {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`AI generation timed out after ${ms / 1000}s`)), ms)
-    ),
-  ]);
-};
+/* ------------------------------------------------------------------ */
+/*  Lesson generation                                                  */
+/* ------------------------------------------------------------------ */
 
 export const generateCourseLesson = async (
   course: Course,
   lessonTitle: string,
   onProgress?: GenerationProgress
 ): Promise<Lesson | null> => {
-  const jsonFormattingRules = String.raw`
-CRITICAL JSON FORMATTING REQUIREMENTS:
-- Return ONLY valid raw JSON with double-quoted keys (e.g., "overview": "value").
-- Do NOT wrap response in markdown code blocks like \`\`\`json.
-- Properly escape all double quotes inside code snippets using backslashes (e.g., \"Hello World\").
-- Inside C++ code examples, use single quotes where possible (e.g., 'Hello') or strictly escape double quotes.
-- Do NOT include raw line breaks inside string values; use \n instead.`;
-
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
   const contextBlock = webContext ? `\n\nUse this optional web research for factual accuracy only:\n${webContext}` : '';
 
   const readingPrompt = `Generate an engaging lesson tutorial on "${lessonTitle}" for "${course.title}" (${course.level} level).
-PEDAGOGICAL STYLE: Warm, direct, freeCodeCamp style with clear markdown and code walk-throughs.
+PEDAGOGICAL STYLE: Warm, direct, freeCodeCamp style with markdown and code walk-throughs.
+HARD LIMIT: 350-450 words, at most 2 short C++ code examples.
 
 Schema:
-{
-  "overview": "1-2 sentence overview",
-  "contentMarkdown": "500-800 word Markdown tutorial covering C++23 concepts."
-}
-${jsonFormattingRules}
-${contextBlock}`;
+{ "overview": "1-2 sentence overview", "contentMarkdown": "350-450 word Markdown tutorial." }
+${jsonFormattingRules}${contextBlock}`;
 
   const interactivePrompt = `Generate C++23 exercises for "${lessonTitle}" in "${course.title}".
+HARD LIMIT: exactly 3 conceptChecks, exactly 2 drills. Omit "capstone" entirely.
 
 Schema:
 {
   "conceptChecks": [{ "question": "...", "options": ["A","B","C","D"], "correctIndex": 0, "explanation": "..." }],
-  "drills": [{ "title": "...", "instructions": "...", "starterCode": "Complete compilable skeleton", "solution": "// solution", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": ["..."] }],
-  "capstone": { "title": "...", "instructions": "...", "starterCode": "...", "solution": "...", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": ["..."] }
+  "drills": [{ "title": "...", "instructions": "...", "starterCode": "...", "solution": "//...", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": [] }]
 }
-${jsonFormattingRules}
-${contextBlock}`;
+${jsonFormattingRules}${contextBlock}`;
 
-  onProgress?.('Generating reading and interactive exercises in parallel...');
+  onProgress?.('Generating reading and exercises in parallel...');
 
-  try {
-    const [readingResponse, interactiveResponse] = await Promise.all([
-      withTimeout(requestJson('course-reading', readingPrompt, 0.1, onProgress), 120000),
-      withTimeout(requestJson('course-lesson', interactivePrompt, 0.1, onProgress), 120000)
-    ]) as [any, any];
+  const [reading, interactive] = await Promise.all([
+    requestJsonWithRetry('course-reading', readingPrompt,
+      { temperature: 0.1, timeoutMs: 110_000, maxTokens: 1600, attempts: 2 }, onProgress)
+      .catch(e => { console.error('[course-reading]', e); return null; }),
+    requestJsonWithRetry('course-lesson', interactivePrompt,
+      { temperature: 0.1, timeoutMs: 110_000, maxTokens: 2800, attempts: 2 }, onProgress)
+      .catch(e => { console.error('[course-lesson]', e); return null; }),
+  ]) as [any, any];
 
-    if (!readingResponse?.contentMarkdown || !interactiveResponse?.drills) {
-      throw new Error('One or both AI passes returned incomplete payloads.');
-    }
-
-    return {
-      id: crypto.randomUUID(),
-      title: lessonTitle,
-      isCompleted: false,
-      bestScore: 0,
-      overview: readingResponse.overview || '',
-      contentMarkdown: readingResponse.contentMarkdown || 'Content unavailable.',
-      conceptChecks: (interactiveResponse.conceptChecks || []).map((check: any) => ({
-        ...check,
-        id: crypto.randomUUID(),
-      })),
-      drills: (interactiveResponse.drills || []).map((drill: any) => ({
-        ...drill,
-        id: crypto.randomUUID(),
-      })),
-      capstone: interactiveResponse.capstone ? {
-        ...interactiveResponse.capstone,
-        id: crypto.randomUUID(),
-      } : undefined,
-    };
-  } catch (error) {
-    console.error('Parallel lesson generation failed:', error);
-    throw error;
+  if (!reading?.contentMarkdown && !interactive?.drills) {
+    throw new Error('Both generation passes failed. Check NIM status/quota and try again.');
   }
+
+  return {
+    id: crypto.randomUUID(),
+    title: lessonTitle,
+    isCompleted: false,
+    bestScore: 0,
+    overview: reading?.overview || '',
+    contentMarkdown: reading?.contentMarkdown || '_Reading failed to generate — press regenerate._',
+    conceptChecks: (interactive?.conceptChecks || []).map((c: any) => ({ ...c, id: crypto.randomUUID() })),
+    drills: (interactive?.drills || []).map((d: any) => ({ ...d, id: crypto.randomUUID() })),
+    capstone: interactive?.capstone ? { ...interactive.capstone, id: crypto.randomUUID() } : undefined,
+  };
 };
+
+/* ------------------------------------------------------------------ */
+/*  Grading                                                            */
+/* ------------------------------------------------------------------ */
 
 export const gradeCodingExercise = async (
   exercise: GeneratedExercise,
