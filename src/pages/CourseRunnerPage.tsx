@@ -1,6 +1,6 @@
 // utils/aiProviders.ts
 
-import type { Course} from '../types/course';
+import type {Course} from '../types/course';
 
 export type GenerationStageUpdater = (stage: string) => void;
 
