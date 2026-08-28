@@ -59,6 +59,37 @@ const readConfigs = (): Partial<Record<AiTask, AiConfig>> => {
   }
 };
 
+const fetchWithProxy = async (
+  endpoint: string,
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: any;
+    signal?: AbortSignal;
+  }
+): Promise<Response> => {
+  const isLocal = endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
+  if (isLocal) {
+    return fetch(endpoint, {
+      method: options.method || 'POST',
+      headers: options.headers || { 'Content-Type': 'application/json' },
+      body: typeof options.body === 'string' ? options.body : JSON.stringify(options.body),
+      signal: options.signal,
+    });
+  } else {
+    return fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint,
+        headers: options.headers,
+        body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body,
+      }),
+      signal: options.signal,
+    });
+  }
+};
+
 export const gradeCodingExercise = async (
   exercise: GeneratedExercise,
   answer: string,
@@ -115,10 +146,9 @@ export const gradeCodingExercise = async (
   }
 
   try {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+    const response = await fetchWithProxy(url, {
+      headers,
+      body: JSON.parse(body),
     });
 
     if (!response.ok) return null;
@@ -217,10 +247,9 @@ export const testAiConfig = async (config: AiConfig): Promise<AiConnectionTestRe
   try {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 30000);
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: url, headers, body }),
+    const response = await fetchWithProxy(url, {
+      headers,
+      body,
       signal: controller.signal,
     });
     window.clearTimeout(timeout);
@@ -370,10 +399,9 @@ const requestJson = async (
     try {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-      response = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+      response = await fetchWithProxy(url, {
+        headers,
+        body: JSON.parse(body),
         signal: controller.signal,
       });
       window.clearTimeout(timeout);

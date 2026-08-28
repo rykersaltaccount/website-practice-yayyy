@@ -141,28 +141,38 @@ const AiHelper = () => {
     let response: Response;
     const isGemini = apiProvider === 'gemini';
     const requestUrl = isGemini ? `${requestEndpoint}/${apiModel.trim()}:generateContent?key=${encodeURIComponent(apiKey.trim())}` : requestEndpoint;
+    const isLocal = requestUrl.includes('localhost') || requestUrl.includes('127.0.0.1');
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      ...(!isGemini && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
+    };
+    const requestBody = isGemini ? { contents: [{ parts: [{ text: `${request}\n\nOptional web research:\n${webContext || 'No web research was available.'}` }] }] } : {
+      model: apiModel.trim(),
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: 'You are Linear Agent, an autonomous programming and sprint assistant for engineers. Give concise, razor-sharp technical advice and action items based on the workspace.' },
+        { role: 'user', content: `Workspace:\n${JSON.stringify(workspace)}\n\nPrompt: ${request}\n\nOptional web research:\n${webContext || 'No web research was available.'}` },
+      ],
+    };
+
     try {
-      response = await fetch('/api/ai', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          endpoint: requestUrl,
-          headers: {
-            'Content-Type': 'application/json',
-            ...(!isGemini && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
-          },
-          body: isGemini ? { contents: [{ parts: [{ text: `${request}\n\nOptional web research:\n${webContext || 'No web research was available.'}` }] }] } : {
-            model: apiModel.trim(),
-            temperature: 0.3,
-            messages: [
-              { role: 'system', content: 'You are Linear Agent, an autonomous programming and sprint assistant for engineers. Give concise, razor-sharp technical advice and action items based on the workspace.' },
-              { role: 'user', content: `Workspace:\n${JSON.stringify(workspace)}\n\nPrompt: ${request}\n\nOptional web research:\n${webContext || 'No web research was available.'}` },
-            ],
-          },
-        }),
-      });
+      response = await (isLocal
+        ? fetch(requestUrl, {
+            method: 'POST',
+            headers: requestHeaders,
+            body: JSON.stringify(requestBody),
+          })
+        : fetch('/api/ai', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              endpoint: requestUrl,
+              headers: requestHeaders,
+              body: requestBody,
+            }),
+          }));
     } catch (error) {
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       throw new Error(`Could not reach ${API_PRESETS[apiProvider].label}. Network/CORS: ${detail}`);
