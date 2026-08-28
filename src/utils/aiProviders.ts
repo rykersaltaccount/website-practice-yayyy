@@ -68,26 +68,16 @@ const fetchWithProxy = async (
     signal?: AbortSignal;
   }
 ): Promise<Response> => {
-  const isLocal = endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
-  if (isLocal) {
-    return fetch(endpoint, {
-      method: options.method || 'POST',
-      headers: options.headers || { 'Content-Type': 'application/json' },
-      body: typeof options.body === 'string' ? options.body : JSON.stringify(options.body),
-      signal: options.signal,
-    });
-  } else {
-    return fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        endpoint,
-        headers: options.headers,
-        body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body,
-      }),
-      signal: options.signal,
-    });
-  }
+  return fetch('/api/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint,
+      headers: options.headers,
+      body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body,
+    }),
+    signal: options.signal,
+  });
 };
 
 export const gradeCodingExercise = async (
