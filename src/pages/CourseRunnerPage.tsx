@@ -25,16 +25,7 @@ export default function CourseRunnerPage() {
   const [stage, setStage] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-<<<<<<< HEAD
-  const [generationStage, setGenerationStage] = useState('');
-  const [generationError, setGenerationError] = useState('');
-  const generatedLessonKey = useRef<string | null>(null);
-  const drillEditorRef = useRef<HTMLDivElement>(null);
-    const [showNextLessonPopup, setShowNextLessonPopup] = useState(false);
-  const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
-  const activeDrill: Drill | undefined = drills[drillIndex];
-=======
->>>>>>> 0fa5c90f337b6469c930b28d7d9fa92dec14b899
+
 
   const handleGenerate = async () => {
     if (!course) {
