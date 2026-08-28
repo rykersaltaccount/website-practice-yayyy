@@ -1,4 +1,4 @@
-import type { Course, Lesson } from '../types/course';
+import type { Course, Lesson, Drill } from '../types/course';
 import { jsonrepair } from 'jsonrepair';
 
 export type AiTask =
@@ -6,14 +6,10 @@ export type AiTask =
   | 'course'
   | 'course-syllabus'
   | 'course-lesson'
-<<<<<<< HEAD
-  | 'course-reading';
-=======
   | 'course-reading'
   | 'course-grading'
   | 'practice'
   | 'test';
->>>>>>> 0fa5c90f337b6469c930b28d7d9fa92dec14b899
 
 export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
 
@@ -46,8 +42,8 @@ const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
 
 const courseModels: Partial<Record<AiTask, AiConfig>> = {
   'course-syllabus': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
-  'course-reading':  { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
-  'course-lesson':   { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'qwen/qwen2.5-coder-32b-instruct' },
+  'course-reading': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'meta/llama-3.1-8b-instruct' },
+  'course-lesson': { provider: 'nim', apiKey: '', endpoint: defaults.nim.endpoint, model: 'qwen/qwen2.5-coder-32b-instruct' },
 };
 
 const oldCourseModels = new Set(['meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1']);
@@ -60,6 +56,96 @@ const readConfigs = (): Partial<Record<AiTask, AiConfig>> => {
     return saved && typeof saved === 'object' ? (saved as Partial<Record<AiTask, AiConfig>>) : {};
   } catch {
     return {};
+  }
+};
+
+export const gradeCodingExercise = async (
+  exercise: GeneratedExercise,
+  answer: string,
+  task: AiTask = 'course-grading'
+): Promise<{ passed: boolean; feedback: string } | null> => {
+  const config = getAiConfig(task);
+  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) {
+    return null;
+  }
+
+  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON with two fields: "passed" (boolean) and "feedback" (string).
+
+  If the solution is CORRECT:
+  - Set "passed": true
+  - Provide encouraging feedback that confirms what was done well and suggests next steps or related concepts to explore
+
+  If the solution is INCORRECT:
+  - Set "passed": false
+  - Provide SPECIFIC, STEP-BY-STEP guidance on exactly what needs to be fixed
+  - Include the EXACT architecture or code structure that should be implemented
+  - Mention specific lines or sections that need modification
+  - Reference the exercise requirements: ${exercise.prompt}
+  - Consider the rubric tokens: ${(exercise.validationTokens || []).join(', ')}
+  - Do NOT reveal hidden tests, but DO explain what concepts or techniques are missing
+  - Format feedback as clear, numbered steps when multiple issues exist
+
+  Exercise: ${exercise.prompt}
+  Submitted C++23 code:\n${answer}`;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let url = config.endpoint;
+  let body: string;
+
+  if (config.provider === 'gemini') {
+    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+    body = JSON.stringify({
+      contents: [{ parts: [{ text: instruction }] }],
+      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+    });
+  } else {
+    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
+    body = JSON.stringify({
+      model: config.model,
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a strict code exercise grader. When code is incorrect, provide EXACT, SPECIFIC guidance on what to fix including precise architectural guidance, line-by-line corrections, and clear next steps. When code is correct, provide encouraging confirmation.',
+        },
+        { role: 'user', content: instruction },
+      ],
+    });
+  }
+
+  try {
+    const response = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const text =
+      config.provider === 'gemini'
+        ? data.candidates?.[0]?.content?.parts?.[0]?.text
+        : data.choices?.[0]?.message?.content;
+
+    if (!text) return null;
+
+    const result = extractJson(text) as { passed?: boolean; feedback?: string };
+    const passed = Boolean(result.passed);
+    const feedback =
+      result.feedback ??
+      (passed
+        ? 'Great job! Your solution passes all tests.'
+        : 'Your solution needs improvement. Please review the exercise requirements carefully and ensure your implementation matches all specified criteria.');
+
+    return { passed, feedback };
+  } catch {
+    return null;
   }
 };
 
@@ -184,7 +270,7 @@ const extractJson = (text: string): unknown => {
   // Attempt 2: Standard jsonrepair
   try {
     return JSON.parse(jsonrepair(cleaned));
-  } catch {}
+  } catch { }
 
   // Attempt 3: Sanitize raw control characters and unescaped line breaks before repair
   try {
@@ -291,15 +377,8 @@ const requestJson = async (
         signal: controller.signal,
       });
       window.clearTimeout(timeout);
-<<<<<<< HEAD
     } catch (error) {
       throw new Error('The AI request timed out after 120 seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.');
-=======
-    } catch {
-      throw new Error(
-        `The AI request timed out after ${Math.round(timeoutMs / 1000)} seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.`
-      );
->>>>>>> 0fa5c90f337b6469c930b28d7d9fa92dec14b899
     }
 
     if (!response.ok) {
@@ -382,9 +461,8 @@ export const generateCourseSyllabus = async (
       : 'Focus on technical and production-level material: cache behavior, allocator and ownership choices, hash quality, adversarial inputs, concurrency, rehashing, load factors, custom hashers, memory layout, and performance measurement.';
 
   const webContext = await getWebContext(`${topic} C++23 systems programming interview concepts`);
-  const syllabusPrompt = `Create a structured C++23 systems programming course about "${topic}" for the ${level} track. ${trackGuidance} Use the web research below only to improve factual accuracy; do not copy source text and do not include citations in the JSON.\nWeb research:\n${
-    webContext || 'No web research was available.'
-  }\nReturn only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for later deep lesson writers. Do not use a marketing tone.`;
+  const syllabusPrompt = `Create a structured C++23 systems programming course about "${topic}" for the ${level} track. ${trackGuidance} Use the web research below only to improve factual accuracy; do not copy source text and do not include citations in the JSON.\nWeb research:\n${webContext || 'No web research was available.'
+    }\nReturn only JSON matching {"title":"...","description":"...","modules":[{"id":"...","title":"...","description":"...","lessons":[{"id":"...","title":"...","isCompleted":false,"bestScore":0}]}]}. Create 3-5 modules with 2-4 lessons each. Make the sequence cumulative and practical. Make objectives concrete enough for later deep lesson writers. Do not use a marketing tone.`;
 
   const result = (await requestJsonWithRetry('course-syllabus', syllabusPrompt, { temperature: 0.2 }, onProgress)) as Omit<
     Course,
@@ -404,7 +482,6 @@ export const generateCourseLesson = async (
   lessonTitle: string,
   onProgress?: GenerationProgress
 ): Promise<Lesson | null> => {
-<<<<<<< HEAD
   const prompt = `Generate an exceptional, highly engaging lesson on "${lessonTitle}" for the course "${course.title}" (${course.level} level).
 
 PEDAGOGICAL & WRITING STYLE (freeCodeCamp interactive tutorial style):
@@ -457,42 +534,19 @@ CRITICAL RULES FOR DRILLS & CAPSTONE:
 - Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main().
 - Do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
 
-=======
->>>>>>> 0fa5c90f337b6469c930b28d7d9fa92dec14b899
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
   const contextBlock = webContext ? `\n\nUse this optional web research for factual accuracy only:\n${webContext}` : '';
 
-  const readingPrompt = `Generate an engaging lesson tutorial on "${lessonTitle}" for "${course.title}" (${course.level} level).
-PEDAGOGICAL STYLE: Warm, direct, freeCodeCamp style with markdown and code walk-throughs.
-HARD LIMIT: 350-450 words, at most 2 short C++ code examples.
+  const fullPrompt = `${prompt}\n${jsonFormattingRules}${contextBlock}`;
 
-Schema:
-{ "overview": "1-2 sentence overview", "contentMarkdown": "350-450 word Markdown tutorial." }
-${jsonFormattingRules}${contextBlock}`;
+  onProgress?.('Generating lesson content and interactive exercises...');
 
-  const interactivePrompt = `Generate C++23 exercises for "${lessonTitle}" in "${course.title}".
-HARD LIMIT: exactly 3 conceptChecks, exactly 2 drills. Omit "capstone" entirely.
+  const result = (await requestJsonWithRetry('course-lesson', fullPrompt,
+    { temperature: 0.1, timeoutMs: 120_000, maxTokens: 4096, attempts: 2 }, onProgress)
+    .catch(e => { console.error('[course-lesson]', e); return null; })) as any;
 
-Schema:
-{
-  "conceptChecks": [{ "question": "...", "options": ["A","B","C","D"], "correctIndex": 0, "explanation": "..." }],
-  "drills": [{ "title": "...", "instructions": "...", "starterCode": "...", "solution": "//...", "hints": ["..."], "gradingTokens": ["..."], "hiddenTests": [] }]
-}
-${jsonFormattingRules}${contextBlock}`;
-
-  onProgress?.('Generating reading and exercises in parallel...');
-
-  const [reading, interactive] = await Promise.all([
-    requestJsonWithRetry('course-reading', readingPrompt,
-      { temperature: 0.1, timeoutMs: 110_000, maxTokens: 1600, attempts: 2 }, onProgress)
-      .catch(e => { console.error('[course-reading]', e); return null; }),
-    requestJsonWithRetry('course-lesson', interactivePrompt,
-      { temperature: 0.1, timeoutMs: 110_000, maxTokens: 2800, attempts: 2 }, onProgress)
-      .catch(e => { console.error('[course-lesson]', e); return null; }),
-  ]) as [any, any];
-
-  if (!reading?.contentMarkdown && !interactive?.drills) {
-    throw new Error('Both generation passes failed. Check NIM status/quota and try again.');
+  if (!result || (!result.contentMarkdown && !result.drills)) {
+    throw new Error('Lesson generation failed. Check NIM status/quota and try again.');
   }
 
   return {
@@ -500,111 +554,20 @@ ${jsonFormattingRules}${contextBlock}`;
     title: lessonTitle,
     isCompleted: false,
     bestScore: 0,
-    overview: reading?.overview || '',
-    contentMarkdown: reading?.contentMarkdown || '_Reading failed to generate — press regenerate._',
-    conceptChecks: (interactive?.conceptChecks || []).map((c: any) => ({ ...c, id: crypto.randomUUID() })),
-    drills: (interactive?.drills || []).map((d: any) => ({ ...d, id: crypto.randomUUID() })),
-    capstone: interactive?.capstone ? { ...interactive.capstone, id: crypto.randomUUID() } : undefined,
+    overview: result.overview || '',
+    contentMarkdown: result.contentMarkdown || '_Reading failed to generate — press regenerate._',
+    conceptChecks: (result.conceptChecks || []).map((c: any) => ({ ...c, id: crypto.randomUUID() })),
+    drills: (result.drills || []).map((d: any) => ({ ...d, id: crypto.randomUUID() })),
+    capstone: result.capstone ? { ...result.capstone, id: crypto.randomUUID() } : undefined,
   };
 };
 
-<<<<<<< HEAD
-export const generateDrillTestHarness = async (drill: Pick<Drill, 'title' | 'instructions' | 'starterCode' | 'solution' | 'hiddenTests'>): Promise<string | null> => {
+export const generateDrillTestHarness = async (_drill: Pick<Drill, 'title' | 'instructions' | 'starterCode' | 'solution' | 'hiddenTests'>): Promise<string | null> => {
   // This function depends on 'course-grading' task which has been removed
   // Returning null as the function is no longer supported
   return null;
-=======
-/* ------------------------------------------------------------------ */
-/*  Grading                                                            */
-/* ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ */
+  /*  Grading                                                            */
+  /* ------------------------------------------------------------------ */
 
-export const gradeCodingExercise = async (
-  exercise: GeneratedExercise,
-  answer: string,
-  task: AiTask = 'course-grading'
-): Promise<{ passed: boolean; feedback: string } | null> => {
-  const config = getAiConfig(task);
-  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) {
-    return null;
-  }
-
-  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON with two fields: "passed" (boolean) and "feedback" (string).
-
-  If the solution is CORRECT:
-  - Set "passed": true
-  - Provide encouraging feedback that confirms what was done well and suggests next steps or related concepts to explore
-
-  If the solution is INCORRECT:
-  - Set "passed": false
-  - Provide SPECIFIC, STEP-BY-STEP guidance on exactly what needs to be fixed
-  - Include the EXACT architecture or code structure that should be implemented
-  - Mention specific lines or sections that need modification
-  - Reference the exercise requirements: ${exercise.prompt}
-  - Consider the rubric tokens: ${(exercise.validationTokens || []).join(', ')}
-  - Do NOT reveal hidden tests, but DO explain what concepts or techniques are missing
-  - Format feedback as clear, numbered steps when multiple issues exist
-
-  Exercise: ${exercise.prompt}
-  Submitted C++23 code:\n${answer}`;
-
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  let url = config.endpoint;
-  let body: string;
-
-  if (config.provider === 'gemini') {
-    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
-    body = JSON.stringify({
-      contents: [{ parts: [{ text: instruction }] }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
-    });
-  } else {
-    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-    body = JSON.stringify({
-      model: config.model,
-      temperature: 0,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are a strict code exercise grader. When code is incorrect, provide EXACT, SPECIFIC guidance on what to fix including precise architectural guidance, line-by-line corrections, and clear next steps. When code is correct, provide encouraging confirmation.',
-        },
-        { role: 'user', content: instruction },
-      ],
-    });
-  }
-
-  try {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
-    });
-
-    if (!response.ok) return null;
-
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const text =
-      config.provider === 'gemini'
-        ? data.candidates?.[0]?.content?.parts?.[0]?.text
-        : data.choices?.[0]?.message?.content;
-
-    if (!text) return null;
-
-    const result = extractJson(text) as { passed?: boolean; feedback?: string };
-    const passed = Boolean(result.passed);
-    const feedback =
-      result.feedback ??
-      (passed
-        ? 'Great job! Your solution passes all tests.'
-        : 'Your solution needs improvement. Please review the exercise requirements carefully and ensure your implementation matches all specified criteria.');
-
-    return { passed, feedback };
-  } catch {
-    return null;
-  }
->>>>>>> 0fa5c90f337b6469c930b28d7d9fa92dec14b899
-};
+}
