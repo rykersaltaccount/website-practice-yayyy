@@ -107,6 +107,7 @@ const CourseRunnerPage: React.FC = () => {
   const [generationError, setGenerationError] = useState('');
   const generatedLessonKey = useRef<string | null>(null);
   const drillEditorRef = useRef<HTMLDivElement>(null);
+    const [showNextLessonPopup, setShowNextLessonPopup] = useState(false);
   const drills = [...(lesson?.drills || []), ...(lesson?.capstone ? [lesson.capstone] : [])];
   const activeDrill: Drill | undefined = drills[drillIndex];
 
