@@ -2,7 +2,13 @@ import type { Concept } from '../types';
 import type { Course, Drill, Lesson } from '../types/course';
 import { jsonrepair } from 'jsonrepair';
 
-export type AiTask = 'helper' | 'course' | 'course-syllabus' | 'course-lesson' | 'course-reading';
+export type AiTask =
+  | 'helper'
+  | 'course'
+  | 'course-syllabus'
+  | 'course-lesson'
+  | 'course-reading';
+
 export type AiProvider = 'nim' | 'ollama' | 'chatgpt' | 'gemini' | 'grok' | 'custom';
 
 export interface AiConfig {
@@ -199,6 +205,7 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
     if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
     body = JSON.stringify({ model: config.model, ...(config.provider === 'ollama' ? { format: 'json' } : {}), ...(config.provider === 'nim' ? { response_format: { type: 'json_object' } } : {}), temperature, max_tokens: 4096, messages: [{ role: 'system', content: 'You are a precise C++23 systems programming course author. Return one valid JSON object only, with no markdown fences or commentary.' }, { role: 'user', content: instruction }] });
   }
+
   try {
     onProgress?.(`Sending request to ${config.model}...`);
     let response: Response;
@@ -212,13 +219,15 @@ const requestJson = async (task: AiTask, instruction: string, temperature = 0.3,
         signal: controller.signal,
       });
       window.clearTimeout(timeout);
-    } catch {
+    } catch (error) {
       throw new Error('The AI request timed out after 120 seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.');
     }
+
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 240);
       throw new Error(`${config.provider} returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
     }
+
     onProgress?.('Response received. Parsing structured output...');
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }> } };
     const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
@@ -296,7 +305,6 @@ CRITICAL RULES FOR DRILLS & CAPSTONE:
 - Author a useful main() function with a small visible example call to the unfinished API, but do not solve the exercise in main().
 - Do not put hidden test cases in starterCode; hiddenTests are private grading cases. Return only the JSON object.`;
 
-  // Execute a SINGLE call instead of chaining multiple calls
   const webContext = await getWebContext(`${lessonTitle} C++23 technical implementation details`);
   const researchPrompt = `${prompt}\n\nUse this optional web research for factual accuracy only; do not copy it or include citations:\n${webContext || 'No web research was available.'}`;
   let result: Partial<Lesson> | null = null;
@@ -337,71 +345,7 @@ CRITICAL RULES FOR DRILLS & CAPSTONE:
 };
 
 export const generateDrillTestHarness = async (drill: Pick<Drill, 'title' | 'instructions' | 'starterCode' | 'solution' | 'hiddenTests'>): Promise<string | null> => {
-  const prompt = `Create a robust, production-grade C++23 test harness for this coding drill.
-Title: ${drill.title}
-Requirements: ${drill.instructions}
-Starter context: ${drill.starterCode}
-Reference solution (use only to design rigorous tests): ${drill.solution}
-Private test ideas: ${(drill.hiddenTests || []).join(' | ')}
-
-Return ONLY valid JSON in this exact shape: {"mainCode":"..."}.
-mainCode must be a complete int main() function containing exactly 10 independent, thorough test cases covering edge cases, standard use cases, performance constraints, and error handling. Label each test clearly with a comment exactly like // TEST 1 through // TEST 10. Use assert statements or explicit validation checks with descriptive failure messages, and return a non-zero exit code if any test fails. The harness must call the learner's implemented functions/classes cleanly.`;
-  try {
-    const result = await requestJson('course-grading', prompt, 0) as { mainCode?: string } | null;
-    const testLabels = result?.mainCode?.match(/\/\/\s*TEST\s+(?:[1-9]|10)\b/gi) || [];
-    return result?.mainCode && /\bmain\s*\(/.test(result.mainCode) && testLabels.length === 10 ? result.mainCode : null;
-  } catch {
-    return null;
-  }
-};
-
-export const gradeCodingExercise = async (exercise: GeneratedExercise, answer: string, task: 'practice' | 'test' | 'course-grading'): Promise<{ passed: boolean; feedback: string } | null> => {
-  const config = getAiConfig(task);
-  if (!config.endpoint.trim() || !config.model.trim() || (!config.apiKey.trim() && config.provider !== 'ollama')) return null;
-
-  const instruction = `Grade this ORIGINAL C++23 coding exercise. Return only JSON with two fields: "passed" (boolean) and "feedback" (string).
-
-  If the solution is CORRECT:
-  - Set "passed": true
-  - Provide encouraging feedback that confirms what was done well and suggests next steps or related concepts to explore
-
-  If the solution is INCORRECT:
-  - Set "passed": false
-  - Provide SPECIFIC, STEP-BY-STEP guidance on exactly what needs to be fixed
-  - Include the EXACT architecture or code structure that should be implemented
-  - Mention specific lines or sections that need modification
-  - Reference the exercise requirements: ${exercise.prompt}
-  - Consider the rubric tokens: ${(exercise.validationTokens || []).join(', ')}
-  - Do NOT reveal hidden tests, but DO explain what concepts or techniques are missing
-  - Format feedback as clear, numbered steps when multiple issues exist
-
-  Exercise: ${exercise.prompt}
-  Submitted C++23 code:\n${answer}`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  let url = config.endpoint;
-  let body: string;
-  if (config.provider === 'gemini') {
-    url = `${config.endpoint}/${config.model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
-    body = JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } });
-  } else {
-    if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-    body = JSON.stringify({ model: config.model, temperature: 0, messages: [{ role: 'system', content: 'You are a strict code exercise grader. When code is incorrect, provide EXACT, SPECIFIC guidance on what to fix including precise architectural guidance, line-by-line corrections, and clear next steps. When code is correct, provide encouraging confirmation.' }, { role: 'user', content: instruction }] });
-  }
-  try {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: url, headers, body: JSON.parse(body) }),
-    });
-    if (!response.ok) return null;
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }> } };
-    const text = config.provider === 'gemini' ? data.candidates?.[0]?.content?.parts?.[0]?.text : data.choices?.[0]?.message?.content;
-    if (!text) return null;
-    const result = extractJson(text) as { passed?: boolean; feedback?: string };
-    const passed = Boolean(result.passed);
-    const feedback = result.feedback ?? (passed ? 'Great job! Your solution passes all tests.' : 'Your solution needs improvement. Please review the exercise requirements carefully and ensure your implementation matches all specified criteria.');
-    return { passed, feedback };
-  } catch {
-    return null;
-  }
+  // This function depends on 'course-grading' task which has been removed
+  // Returning null as the function is no longer supported
+  return null;
 };
