@@ -33,7 +33,7 @@ export interface GeneratedExercise {
 
 const defaults: Record<AiProvider, Omit<AiConfig, 'apiKey'>> = {
   nim: { provider: 'nim', endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions', model: 'meta/llama-3.1-8b-instruct' },
-  ollama: { provider: 'ollama', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.2' },
+  ollama: { provider: 'ollama', endpoint: 'http://127.0.0.1:11434/v1/chat/completions', model: 'llama3.2' },
   chatgpt: { provider: 'chatgpt', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
   gemini: { provider: 'gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/models', model: 'gemini-2.0-flash' },
   grok: { provider: 'grok', endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.1-mini' },
