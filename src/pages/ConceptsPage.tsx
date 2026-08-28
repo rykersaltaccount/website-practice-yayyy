@@ -32,50 +32,6 @@ interface Exercise {
 
 type PracticeDifficulty = 'Easy' | 'Medium' | 'Hard';
 
-const buildExercises = (concept: Concept, difficulty?: PracticeDifficulty): Exercise[] => {
-  const name = concept.name;
-  const description = concept.description || `the core idea behind ${name}`;
-  const complexity = concept.timeComplexity || 'the expected time complexity';
-  const exercises: Exercise[] = [
-    {
-      type: 'question', level: 'Foundations',
-      prompt: `In one sentence, what problem does ${name} solve?`,
-      hint: 'Start with the purpose, not the implementation.',
-      acceptedAnswers: [name.toLowerCase(), ...description.toLowerCase().split(/\W+/).filter(word => word.length > 4).slice(0, 3)],
-    },
-    {
-      type: 'question', level: 'Core mechanics',
-      prompt: `Describe the core mechanism or invariant that makes ${name} work.`,
-      hint: 'Name the state, rule, or operation that must remain true.',
-      acceptedAnswers: [name.toLowerCase(), ...description.toLowerCase().split(/\W+/).filter(word => word.length > 5).slice(1, 4)],
-    },
-    {
-      type: 'coding', level: 'Application',
-      prompt: `Write a C++23 solution for an original practical scenario where ${name} is preferable to a simpler approach.`,
-      hint: 'Implement the requested behavior in C++23 and explain your trade-off in a comment.',
-      acceptedAnswers: [],
-      starterCode: `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // Implement the solution in C++23.\n    return 0;\n}\n`,
-      validationTokens: ['#include', 'return 0'],
-    },
-    {
-      type: 'question', level: 'Complexity',
-      prompt: `What time or space complexity should you expect when using ${name}?`,
-      hint: 'Use Big-O notation when you can.',
-      acceptedAnswers: [complexity.toLowerCase(), 'o(', 'complexity', 'linear', 'constant', 'log'],
-    },
-    {
-      type: 'question', level: 'Advanced synthesis',
-      prompt: `Explain one trade-off, edge case, or failure mode an expert should consider with ${name}.`,
-      hint: 'A strong answer names both the risk and how you would handle it.',
-      acceptedAnswers: ['trade-off', 'tradeoff', 'edge', 'case', 'failure', 'risk', 'memory', 'performance', name.toLowerCase()],
-    },
-  ];
-  if (difficulty === 'Easy') return exercises.slice(0, 2);
-  if (difficulty === 'Medium') return exercises.slice(1, 4);
-  if (difficulty === 'Hard') return exercises.slice(2);
-  return exercises;
-};
-
 const ConceptsPage: React.FC = () => {
   const { concepts, addConcept, updateConcept, deleteConcept, reviewConcept, problems, notes } = useContext(AppContext)!;
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
@@ -84,7 +40,7 @@ const ConceptsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [conceptToDelete, setConceptToDelete] = useState<Concept | null>(null);
   const [testConcept, setTestConcept] = useState<Concept | null>(null);
-  const [testExercises, setTestExercises] = useState<Exercise[]>([]);
+const [testExercises] = useState<Exercise[]>([]); // remove setTestExercises setter
   const [testIndex, setTestIndex] = useState(0);
   const [testAnswer, setTestAnswer] = useState('');
   const [testResult, setTestResult] = useState<'idle' | 'passed' | 'failed'>('idle');
@@ -93,7 +49,6 @@ const ConceptsPage: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [codeAnswer, setCodeAnswer] = useState('');
-  const [assessmentTask, setAssessmentTask] = useState<'practice' | 'test'>('test');
   // Manual workflow state for external AI checking
   const [externalAIPrompt, setExternalAIPrompt] = useState('');
   const [showExternalAIPrompt, setShowExternalAIPrompt] = useState(false);
@@ -126,7 +81,6 @@ const ConceptsPage: React.FC = () => {
   // Updated to generate prompt for external AI instead of calling generateExercises
   const startConceptTest = async (concept: Concept) => {
     setIsGenerating(true);
-    setAssessmentTask('test');
     // Generate a prompt for external AI to create exercises for this concept
     const prompt = `Please create a progressive test for the programming concept "${concept.name}".
 Concept description: ${concept.description || 'No description provided'}
@@ -156,7 +110,6 @@ Format your response as a structured list that I can use to create exercises.`;
   const startPractice = async () => {
     if (!practiceConcept) return;
     setIsGenerating(true);
-    setAssessmentTask('practice');
     // Generate a prompt for external AI to create practice exercises for this concept
     const prompt = `Please create practice exercises for the programming concept "${practiceConcept.name}" at ${practiceDifficulty} difficulty level.
 Concept description: ${practiceConcept.description || 'No description provided'}
@@ -242,14 +195,18 @@ Format your response as a structured list that I can use to create exercises.`;
   // New function to manually mark a concept as mastered after external AI check
   const markConceptAsMastered = () => {
     if (!selectedConceptForPrompt) return;
-    updateConcept(selectedConceptForPrompt.id, {
-      mastery: { mastered: true, masteredAt: new Date().toISOString() },
-    });
+      updateConcept(selectedConceptForPrompt.id, {
+        mastery: {
+          mastered: true,
+          masteredAt: new Date().toISOString(),
+          bestScore: selectedConceptForPrompt.mastery?.bestScore ?? 0,
+          attempts: (selectedConceptForPrompt.mastery?.attempts ?? 0) + 1,
+        },
+      });
     setShowExternalAIPrompt(false);
     setSelectedConceptForPrompt(null);
     setExternalAIPrompt('');
   };
-
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -470,7 +427,6 @@ Format your response as a structured list that I can use to create exercises.`;
                     onClick={() => {
                       navigator.clipboard.writeText(externalAIPrompt).then(() => {
                         // Show temporary feedback
-                        const originalText = document.querySelector('button[onclick*="copyText"]')?.textContent;
                         // In a real app, we'd use state to show this feedback
                         alert('Prompt copied to clipboard!');
                       });
