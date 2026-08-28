@@ -273,7 +273,7 @@ export const testAiConfig = async (config: AiConfig): Promise<AiConnectionTestRe
       message:
         error instanceof DOMException && error.name === 'AbortError'
           ? 'Timed out after 30 seconds.'
-          : 'Proxy or network request failed.',
+          : `Proxy or network request failed: ${error instanceof Error ? error.message : String(error)}`,
       latencyMs,
     };
   }
@@ -406,7 +406,7 @@ const requestJson = async (
       });
       window.clearTimeout(timeout);
     } catch (error) {
-      throw new Error('The AI request timed out after 120 seconds or the CodeVault AI proxy is unavailable. Check NIM status, confirm the model name and API key, then retry.');
+      throw new Error(`The AI request failed: ${error instanceof Error ? error.message : String(error)}. Check connection, confirm the model name/API key, then retry.`);
     }
 
     if (!response.ok) {
